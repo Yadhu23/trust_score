@@ -19,6 +19,7 @@ from ui.components import render_final_system_decision
 from ui.live_ui import render_live_ui
 from ui.csv_ui import render_csv_ui
 from ui.test_ui import render_test_ui
+from ui.home_ui import render_home_ui
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -242,7 +243,7 @@ init_session_state()
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<h2 style="font-weight:800; margin-bottom:1.5rem;">⚙️ <span class="gradient-text">Engine Control</span></h2>', unsafe_allow_html=True)
-    mode = st.radio("Navigation Mode", ["📂 CSV Mode", "📡 Live API Mode", "🧪 Test Scenario Mode"])
+    mode = st.radio("Navigation Mode", ["🏠 Home", "📂 CSV Mode", "📡 Live API Mode", "🧪 Test Scenario Mode"])
     st.divider()
 
     # Reset detection
@@ -276,7 +277,9 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────
 # MAIN ROUTING
 # ─────────────────────────────────────────────────────────────
-if mode == "📡 Live API Mode":
+if mode == "🏠 Home":
+    render_home_ui()
+elif mode == "📡 Live API Mode":
     render_live_ui()
 elif mode == "🧪 Test Scenario Mode":
     render_test_ui(TEST_SCENARIOS)

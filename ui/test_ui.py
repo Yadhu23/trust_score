@@ -164,13 +164,12 @@ def render_test_ui(TEST_SCENARIOS):
             
             cs = float(cons_df.iloc[0][f"consensus_score_{s[-1]}"]) if cons_df is not None else 0.5
             w_cons = float(cons_df.iloc[0]["median_value"]) if cons_df is not None else val
-            
             # Performance for reliability
             tol = max(0.5, 0.08 * abs(w_cons)) + 1e-9
             perf = float(np.clip(1.0 - abs(val - w_cons) / tol, 0.0, 0.995))
 
             old_t = st.session_state.test_trust_state.get(s, 0.5)
-            new_t, _ = update_historical_trust(old_t, anom, cs, performance=perf)
+            new_t, _ = update_historical_trust(old_t, anom, cs, performance=perf, source_id=s)
             st.session_state.test_trust_state[s] = new_t
             
             # Update reliability state in session
@@ -193,6 +192,13 @@ def render_test_ui(TEST_SCENARIOS):
             # Classification
             dis_idx = float(cons_df.iloc[0]["disagreement_index"]) if cons_df is not None else 0.0
             is_ex = bool(cons_df.iloc[0]["is_extreme_chaos"]) if cons_df is not None and "is_extreme_chaos" in cons_df.columns else False
+            decision = classify_trust(
+                smoothed, 
+                disagreement_index=dis_idx, 
+                anomaly_score=anom,
+                weighted_mean=w_cons,
+                is_extreme_chaos=is_ex
+            )
             
             # Historic trust update
             st.session_state.test_total_events[s] += 1
@@ -200,22 +206,27 @@ def render_test_ui(TEST_SCENARIOS):
                 st.session_state.test_successful_events[s] += 1
             h_trust = st.session_state.test_successful_events[s] / st.session_state.test_total_events[s]
 
+            # Interpretation
+            interp_data = interpret_source(
+                instant_confidence=smoothed,
+                reliability_index=new_rel,
+                historic_trust=h_trust,
+                final_score=final,
+                status=decision,
+                source_id=s,
+            )
+
             st.session_state.test_records.append({
                 "tick": tick, "source": s, "value": val, "final_score": final,
                 "smoothed": smoothed,
-                "decision": classify_trust(
-                    smoothed, 
-                    disagreement_index=dis_idx, 
-                    anomaly_score=anom,
-                    weighted_mean=w_cons,
-                    is_extreme_chaos=is_ex
-                ),
+                "decision": decision,
                 "historical_trust": new_t,
                 "historic_trust": h_trust,
                 "anomaly_score": anom,
                 "consensus_score": cs,
                 "reliability_index": new_rel,
-                "is_anomaly": anom > 0.4
+                "is_anomaly": anom > 0.4,
+                "interpretation": interp_data
             })
 
     # ── Render Results ─────────────────────────────────────────

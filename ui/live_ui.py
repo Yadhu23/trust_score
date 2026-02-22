@@ -299,7 +299,7 @@ def render_live_ui():
 
             # EMA Update with ceiling
             old_trust = _trust_state[src]
-            new_trust, _ = update_historical_trust(old_trust, anomaly_score, consensus_score, performance=_perf)
+            new_trust, _ = update_historical_trust(old_trust, anomaly_score, consensus_score, performance=_perf, source_id=src)
             _trust_state[src] = new_trust
 
             # Scoring & Stability

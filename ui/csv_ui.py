@@ -39,14 +39,18 @@ def render_csv_ui(uploaded_file):
             st.error("Need at least 5 rows for rolling statistics.")
             st.stop()
 
-        # ── Run the trust pipeline ───────────────────────────────────
-        with st.spinner("Simulating sources and running TrustLayer analysis…"):
-            results = run_trust_pipeline(raw_df)
-            # Ensure timestamp is datetime for robust plotting
-            results["timestamp"] = pd.to_datetime(results["timestamp"], errors="coerce")
-            
-            # Reconstruct sim_df from long-format results for backward compatibility in the UI
-            sim_df = results.pivot(index="timestamp", columns="source", values="value").reset_index()
+        # ── Run the trust pipeline (Cached in session state) ─────────
+        if "csv_results_v3" not in st.session_state or st.session_state.get("csv_filename") != uploaded_file.name:
+            with st.spinner("Simulating sources and running TrustLayer analysis…"):
+                st.session_state.csv_results_v3 = run_trust_pipeline(raw_df)
+                st.session_state.csv_filename = uploaded_file.name
+                # Ensure timestamp is datetime for robust plotting
+                st.session_state.csv_results_v3["timestamp"] = pd.to_datetime(st.session_state.csv_results_v3["timestamp"], errors="coerce")
+        
+        results = st.session_state.csv_results_v3
+        
+        # Reconstruct sim_df from long-format results for backward compatibility in the UI
+        sim_df = results.pivot(index="timestamp", columns="source", values="value").reset_index()
 
         sources = ["Source_A", "Source_B", "Source_C"]
         source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
@@ -122,7 +126,7 @@ def render_csv_ui(uploaded_file):
                     </div>
                 ''', unsafe_allow_html=True)
 
-                _interp = interpret_source(float(row["final_score"]), 0.7, float(row["historical_trust"]), float(row["final_score"]), row["decision"])
+                _interp = interpret_source(float(row["final_score"]), 0.7, float(row["historical_trust"]), float(row["final_score"]), row["decision"], source_id=src)
                 st.markdown(f'''
                     <div class="glass-card" style="padding:15px; border-left: 3px solid {color}88;">
                         <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700; margin-bottom:10px;">Engine Drilldown</p>
@@ -243,6 +247,45 @@ def render_csv_ui(uploaded_file):
 
         # Explanation panel
         st.header("🔍 Why Was a Source Flagged?")
-        sel_src = st.selectbox("Select a source to inspect:", sources)
-        src_df = results[results["source"] == sel_src].copy()
+        sel_src = st.selectbox("Select a source to inspect:", sources, key="csv_source_inspector")
+        
+        # Get latest data for this source for interpretation
+        # Use .iloc[-1] for direct, reactive access to the latest state of the selected source
+        src_all = results[results["source"] == sel_src].sort_values("timestamp")
+        if not src_all.empty:
+            row = src_all.iloc[-1]
+            interp = interpret_source(
+                instant_confidence=row["final_score"],
+                reliability_index=row["reliability_index"],
+                historic_trust=row["historic_trust"],
+                final_score=row["final_score"],
+                status=row["decision"],
+                source_id=sel_src,
+                weighted_mean=row["value"]
+            )
+            
+            # Render interpretation in a premium box
+            st.markdown(f"""
+                <div style="background:#12172a; border-left:3px solid #7eb8f7; border-radius:10px; padding:18px 24px; margin-bottom:20px; font-size:16px; line-height:1.8; border:1px solid #30363d;">
+                    <div class="metric-sub-header" style="color:var(--text-dim); font-size:0.75rem; font-weight:700; text-transform:uppercase; margin-bottom:10px;">📋 Engine Interpretation: {sel_src}</div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                        <div>
+                            <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Historical Assessment</p>
+                            <p style="margin:2px 0 0 0; font-weight:700;">{interp['historic_assessment']}</p>
+                        </div>
+                        <div>
+                            <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Current Behavior</p>
+                            <p style="margin:2px 0 0 0; font-weight:700;">{interp['current_behavior']}</p>
+                        </div>
+                    </div>
+                    <div style="margin-top:15px; padding-top:15px; border-top:1px solid rgba(255,255,255,0.05);">
+                        <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Operational Recommendation</p>
+                        <p style="margin:4px 0 0 0; font-size:1.1rem; font-weight:800; color:{'#f85149' if 'Isolate' in row['decision'] else '#58a6ff'};">
+                            {interp['recommendation']}
+                        </p>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        src_df = results[results["source"] == sel_src].copy().sort_values("timestamp", ascending=False)
         st.dataframe(src_df, width="stretch")

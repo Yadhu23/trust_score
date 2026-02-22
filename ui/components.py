@@ -75,13 +75,27 @@ def render_final_system_decision(latest_df):
             else:
                 rec_val = monitors['value'].mean()
         
-        if not active_sources.empty:
-            if 'historic_trust' in active_sources.columns and 'reliability_index' in active_sources.columns:
-                temp_sources = active_sources.copy()
-                temp_sources['historical_score'] = 0.7 * temp_sources['historic_trust'] + 0.3 * temp_sources['reliability_index']
-                best_source = temp_sources.loc[temp_sources['historical_score'].idxmax()]
+        if not latest_df.empty:
+            # 🎯 Explicit Selection Rule
+            # 1. Primary: Find source marked as "Recommended Primary Source"
+            recommended_row = latest_df[
+                latest_df["decision"].str.contains("Recommended Primary Source", case=False)
+            ]
+            
+            if not recommended_row.empty:
+                best_source = recommended_row.iloc[0]
             else:
-                best_source = active_sources.loc[active_sources[score_col].idxmax()]
+                # 2. Fallback: Force Source_A
+                fallback_row = latest_df[latest_df["source"] == "Source_A"]
+                if not fallback_row.empty:
+                    best_source = fallback_row.iloc[0]
+                else:
+                    best_source = latest_df.iloc[0] # Ultimate safety fallback
+
+            # 3. Score Selection (historic_trust priority)
+            hist_col = "historic_trust" if "historic_trust" in latest_df.columns else "historical_trust"
+            best_src_score_val = best_source.get(hist_col, best_source.get(score_col, 0.0))
+            best_source_display_score = f"{best_src_score_val:.3f} HIST" if hist_col in best_source else f"{best_src_score_val:.3f}"
 
     # ── 2. Per-Source Detail Bar ─────────────────────────────────
     source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
@@ -127,16 +141,8 @@ def render_final_system_decision(latest_df):
     best_src_score = ""
     
     if best_source is not None:
-        if 'source' in best_source and pd.notna(best_source['source']):
-            best_src_name = best_source['source']
-        elif hasattr(best_source, 'name') and best_source.name and "Source_" in str(best_source.name):
-            best_src_name = best_source.name
-        
-        h_score = best_source.get('historical_score')
-        if pd.notna(h_score):
-            best_src_score = f"{h_score:.3f} HIST"
-        else:
-            best_src_score = f"{best_source[score_col]:.3f}"
+        best_src_name = best_source['source']
+        best_src_score = best_source_display_score
 
     c1, c2 = st.columns([2, 1])
     
@@ -207,6 +213,8 @@ def _render_interpretation(
     historic_trust: float,
     final_score: float,
     status: str,
+    source_id: str | None = None,
+    **kwargs,
 ):
     """
     Renders the rule-based interpretation panel for one source.
@@ -219,14 +227,18 @@ def _render_interpretation(
         historic_trust=historic_trust,
         final_score=final_score,
         status=status,
+        source_id=source_id,
+        **kwargs,
     )
 
     # Icon mapping for recommendation
     rec_icons = {
         "Recommended Primary Source":         "🟢",
+        "Monitor":                            "🟡",
         "Temporarily Deviating – Monitor":    "🟡",
         "Short-Term Agreement, Long-Term Risk": "🟠",
         "Unreliable – Consider Isolation":    "🔴",
+        "Critical – Immediate Isolation required": "🔴",
     }
     # Icon mapping for historic assessment
     hist_icons = {

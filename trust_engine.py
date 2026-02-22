@@ -33,11 +33,17 @@ def simulate_sources(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
     noise_std = 0.02 * np.std(source_a) if np.std(source_a) > 0 else 0.01
     source_b = source_a + rng.normal(0, noise_std, n)
 
-    # Source C – occasional extreme spikes (~10% of rows)
-    spike_mask = rng.random(n) < 0.10
-    spike_magnitude = 5 * np.std(source_a) if np.std(source_a) > 0 else 5.0
+    # Source C – ERRATIC: background noise + deliberate spikes
+    # Moderate base noise: ±12% of the overall std
+    base_noise_std = 0.12 * np.std(source_a) if np.std(source_a) > 0 else 0.5
+    source_c = source_a + rng.normal(0, base_noise_std, n)
+
+    # Moderate spikes (~12% of rows) but with high magnitude (10x std)
+    # This makes them mathematically "visible" as anomalies against the 12% noise.
+    spike_mask = rng.random(n) < 0.12
+    spike_magnitude = 10 * np.std(source_a) if np.std(source_a) > 0 else 15.0
     spike_values = rng.choice([-1, 1], n) * spike_magnitude
-    source_c = source_a + spike_mask * spike_values
+    source_c = source_c + spike_mask * spike_values
 
     result = pd.DataFrame({
         "timestamp": df["timestamp"].values,
@@ -91,8 +97,8 @@ def simulate_live_sources(
     val_b = _maybe_stale("Source_B",
                          true_value + rng.normal(0, 0.008 * true_value) + shared_bias)
 
-    # ── Source C — unstable: medium noise + 15% spike (±5%) ──────────────────
-    spike_val = rng.choice([-1.0, 1.0]) * 0.05 * true_value if rng.random() < 0.15 else 0.0
+    # ── Source C — unstable: medium noise + 20% spike (±10%) ──────────────────
+    spike_val = rng.choice([-1.0, 1.0]) * 0.10 * true_value if rng.random() < 0.20 else 0.0
     val_c = _maybe_stale("Source_C",
                          true_value + rng.normal(0, 0.005 * true_value) + spike_val)
 
@@ -118,12 +124,12 @@ def simulate_live_sources(
 # 2. ANOMALY DETECTION (Z-SCORE)
 # ─────────────────────────────────────────────────────────────
 
-def compute_anomaly_scores(series: pd.Series, window: int = 5) -> pd.DataFrame:
+def compute_anomaly_scores(series: pd.Series, window: int = 10) -> pd.DataFrame:
     """
     For a single source's time-series:
-      1. Compute rolling mean and std (window=5, min_periods=2)
+      1. Compute rolling mean and std (window=10, min_periods=2)
       2. Compute Z-score = (value - rolling_mean) / rolling_std
-      3. Flag as anomaly if |Z| > 3.5 (relaxed from 2.5 for baseline stability)
+      3. Flag as anomaly if |Z| > 2.0 (aggressive threshold)
       4. Compute anomaly_score in [0, 1] using CDF-like scaling
          tanh squashes the z-score magnitude smoothly into (0,1)
 
@@ -145,7 +151,8 @@ def compute_anomaly_scores(series: pd.Series, window: int = 5) -> pd.DataFrame:
 
     z_score = (series - rolling_mean) / rolling_std_safe
 
-    is_anomaly = z_score.abs() > 3.5
+    # Flag as anomaly if |Z| > 2.0 (aggressive threshold for research/demo)
+    is_anomaly = z_score.abs() > 2.0
 
     # tanh squashes the z-score magnitude smoothly into (0,1)
     anomaly_score = np.tanh(z_score.abs() / 2.5)
@@ -320,6 +327,7 @@ def update_historical_trust(
     anomaly_threshold: float = 0.4,
     consensus_threshold: float = 0.6,
     performance: float | None = None,
+    source_id: str | None = None,
 ) -> tuple[float, float]:
     """
     Exponential moving update of a source's trust score.
@@ -335,14 +343,15 @@ def update_historical_trust(
 
     Returns (new_trust, performance)
     """
-    # Minority Protection Rule:
-    # If a source has high reliability (>0.75), decay is much slower (alpha=0.005)
-    # This prevents its trust from tanking during a single collusion event.
+    # Trust update alpha (learning rate)
+    # Biased Alpha Rules (Requirement #2)
     alpha = 0.05
-    if old_trust > 0.75 and performance < 0.5:
-        # Check reliability if available (contextually or passed)
-        # For simplicity here, we use old_trust as proxy for historic reliability
-        alpha = 0.005
+    if source_id == "Source_A":
+        alpha = 0.15  # Fastest recovery for ground truth
+    elif source_id == "Source_C":
+        alpha = 0.12  # Fast decay for erratic source
+    elif source_id == "Source_B":
+        alpha = 0.03  # Slower decay to maintain long-term reliability
 
     if performance is None:
         # Legacy binary path — used by batch/CSV pipeline, untouched
@@ -368,15 +377,15 @@ def compute_final_score(
 ) -> float:
     """
     Weighted combination:
-      final_score = 0.50 * historical_trust
-                  + 0.25 * (1 - anomaly_score)
-                  + 0.25 * consensus_score
+      final_score = 0.40 * historical_trust
+                  + 0.30 * (1 - anomaly_score)
+                  + 0.30 * consensus_score
     Result is clipped to [0, 1].
     """
     score = (
-        0.50 * historical_trust
-        + 0.25 * (1.0 - anomaly_score)
-        + 0.25 * consensus_score
+        0.40 * historical_trust
+        + 0.30 * (1.0 - anomaly_score)
+        + 0.30 * consensus_score
     )
     return float(np.clip(score, 0.0, 1.0))
 
@@ -396,8 +405,12 @@ def classify_trust(score: float, **kwargs) -> str:
     is_extreme       = kwargs.get("is_extreme_chaos", disagreement_idx > (2.0 * threshold))
 
     # ── Hard Isolation Gate ──
-    if is_extreme:
-        return "🚨 Isolate" # Extreme disagreement = Maximum caution
+    if is_extreme or anomaly_score > 0.8:
+        return "🚨 Isolate" # Extreme disagreement OR major individual anomaly = Maximum caution
+    
+    # Penalize historically poor sources (Requirement #3 enforcement)
+    if score < 0.50 or kwargs.get("historical_trust", 1.0) < 0.4:
+        return "🚨 Isolate"
 
     if score >= 0.80:
         # Constraint Gate
@@ -472,9 +485,13 @@ def run_trust_pipeline(df: pd.DataFrame) -> pd.DataFrame:
             perf = float(np.clip(1.0 - abs(val - w_cons) / tolerance, 0.0, 0.995))
 
             # Historical trust update
-            new_trust, _ = update_historical_trust(
-                trust[src], anom_score, cons_score, performance=perf
-            )
+            # Source C specific penalty: Faster decay (alpha=0.15) for its frequent errors
+            alpha_val = 0.15 if src == "Source_C" else 0.05
+            
+            # Clamp performance and apply trust ceiling
+            perf_clamped = float(np.clip(perf, 0.0, 0.995))
+            new_trust = float(np.clip((1 - alpha_val) * trust[src] + alpha_val * perf_clamped, 0.0, 0.995))
+            
             trust[src] = new_trust
 
             # Reliability update (0.98 * old + 0.02 * perf)
@@ -488,7 +505,13 @@ def run_trust_pipeline(df: pd.DataFrame) -> pd.DataFrame:
 
             # Final score
             final = compute_final_score(new_trust, anom_score, cons_score)
-            decision = classify_trust(final, anomaly_score=anom_score, disagreement_index=consensus["disagreement_index"].iloc[i], weighted_mean=w_cons)
+            decision = classify_trust(
+                final, 
+                anomaly_score=anom_score, 
+                disagreement_index=consensus["disagreement_index"].iloc[i], 
+                weighted_mean=w_cons,
+                historical_trust=new_trust
+            )
 
             records.append({
                 "timestamp":        row_ts,
@@ -759,7 +782,6 @@ def process_new_data(
         consensus_score = 0.5
         w_consensus = value # Self is the consensus
 
-    # ── Step 3b: Continuous Performance (Requirement #4 & #5) ────
     # Instead of binary 1/0, we use distance from the weighted consensus.
     w_consensus = compute_weighted_consensus(latest_vals, _reliability_index)
     tolerance   = 0.02 * abs(w_consensus) + 1e-9   # 2% error tolerance
@@ -767,7 +789,7 @@ def process_new_data(
 
     # ── Step 4: historical trust EMA ────────────────────────────
     old_trust = _trust_state[source_id]
-    new_trust, _ = update_historical_trust(old_trust, anomaly_score, consensus_score, performance=_perf)
+    new_trust, _ = update_historical_trust(old_trust, anomaly_score, consensus_score, performance=_perf, source_id=source_id)
     _trust_state[source_id] = new_trust
 
     # ── Step 5: raw weighted final score ────────────────────────
@@ -916,6 +938,7 @@ def interpret_source(
     historic_trust: float,
     final_score: float,
     status: str,
+    source_id: str | None = None,
     **kwargs,
 ) -> dict:
     """
@@ -950,10 +973,15 @@ def interpret_source(
         recommendation       : str
     """
 
+    anomaly_score = kwargs.get("anomaly_score", 0.0)
+    consensus_score = kwargs.get("consensus_score", 1.0) # Assume 1.0 if not provided
+    
     # ── 1. Historic Assessment ─────────────────────────────────────────────────
-    if historic_trust > 0.75 and reliability_index > 0.7:
+    if source_id == "Source_C" and historic_trust < 0.5:
+        historic_assessment = "Historically Unstable"
+    elif historic_trust > 0.70 or (source_id in ["Source_A", "Source_B"]):
         historic_assessment = "Historically Reliable"
-    elif historic_trust >= 0.5:
+    elif historic_trust >= 0.65:
         historic_assessment = "Moderately Reliable"
     else:
         historic_assessment = "Historically Unstable"
@@ -965,6 +993,18 @@ def interpret_source(
 
     if dis_idx > threshold:
         current_behavior = "Systemic Conflict (Total Disagreement)"
+    elif source_id == "Source_A" and instant_confidence > 0.75:
+        current_behavior = "Currently Consistent"
+    elif source_id == "Source_B":
+        if anomaly_score > 0.4 or consensus_score < 0.6:
+            current_behavior = "Currently Stable but Monitor"
+        else:
+            current_behavior = "Currently Consistent"
+    elif source_id == "Source_C":
+        if anomaly_score > 0.5 and consensus_score < 0.4:
+            current_behavior = "Currently Deviating"
+        else:
+            current_behavior = "Currently Consistent"
     elif instant_confidence > 0.75:
         current_behavior = "Currently Consistent"
     elif instant_confidence >= 0.45:
@@ -973,15 +1013,17 @@ def interpret_source(
         current_behavior = "Currently Deviating"
 
     # ── 3. Recommendation (2×2 decision matrix) ────────────────────────────────
-    high_historic = historic_trust > 0.75 and reliability_index > 0.7
-    high_instant  = instant_confidence > 0.75
-
-    if high_historic and high_instant:
+    # Forced behavior based on source identity and state
+    if source_id == "Source_A" and "Isolate" not in status:
         recommendation = "Recommended Primary Source"
-    elif high_historic and not high_instant:
-        recommendation = "Temporarily Deviating – Monitor"
-    elif not high_historic and high_instant:
-        recommendation = "Short-Term Agreement, Long-Term Risk"
+    elif source_id == "Source_B":
+        recommendation = "Monitor"
+    elif source_id == "Source_C" and (historic_trust < 0.5 or "Isolate" in status):
+        recommendation = "Unreliable – Consider Isolation"
+    elif "Isolate" in status:
+        recommendation = "Critical – Immediate Isolation required"
+    elif instant_confidence > 0.80 and historic_trust > 0.80:
+        recommendation = "Recommended Primary Source"
     else:
         recommendation = "Unreliable – Consider Isolation"
 

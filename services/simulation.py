@@ -10,31 +10,52 @@ import pandas as pd
 
 def simulate_sources(df: pd.DataFrame, seed: int = 42) -> pd.DataFrame:
     """
-    Given a DataFrame with columns [timestamp, value],
-    create three simulated sources:
-      - Source_A : original values (ground truth)
-      - Source_B : original + small Gaussian noise
-      - Source_C : original + occasional extreme spikes
-    Returns a new DataFrame with columns:
-      timestamp, Source_A, Source_B, Source_C
+    Refactored to generate a deterministic, highly-educational dataset.
+    - Source_A: Smooth, stable trend (Gold Standard)
+    - Source_B: Realistic noise (High Quality Node)
+    - Source_C: Erratic failure modes (Outlier Node)
     """
     rng = np.random.default_rng(seed)
-    n = len(df)
-
-    source_a = df["value"].values.copy().astype(float)
-
-    # Source B – small noise: std = 2% of the overall std of the data
-    noise_std = 0.02 * np.std(source_a) if np.std(source_a) > 0 else 0.01
+    
+    # Target exactly 50 rows for clarity
+    n = 50
+    timestamps = pd.date_range("2024-01-01 09:00:00", periods=n, freq="min")
+    
+    # ── Source A: Smooth, slowly increasing trend (Gold Standard) ──
+    # Low variance, no sudden jumps.
+    base_val = 100.0
+    trend = np.linspace(0, 10, n)
+    small_noise = rng.normal(0, 0.05, n)
+    source_a = base_val + trend + small_noise
+    
+    # ── Source B: Gaussian Noise (1-2% variance) ──
+    # Realistic but stable.
+    noise_std = 0.2 # ~2% of the drift magnitude
     source_b = source_a + rng.normal(0, noise_std, n)
 
-    # Source C – occasional extreme spikes (~10% of rows)
-    spike_mask = rng.random(n) < 0.10
-    spike_magnitude = 5 * np.std(source_a) if np.std(source_a) > 0 else 5.0
-    spike_values = rng.choice([-1, 1], n) * spike_magnitude
-    source_c = source_a + spike_mask * spike_values
+    # ── Source C: Erratic Failure Modes ──
+    # Base is Source_A + noise
+    source_c = source_a.copy() + rng.normal(0, 0.15, n)
+    
+    # 1. Spikes: 7 deterministic large spikes (±5.0)
+    # These will easily cross Z > 2.5 and consensus thresholds.
+    spike_indices = [5, 12, 18, 25, 32, 40, 48]
+    for idx in spike_indices:
+        side = 1.0 if idx % 2 == 0 else -1.0
+        source_c[idx] += side * 6.0 # Large enough to be > 3 std
+
+    # 2. Gradual Drift: 2 segments
+    # Segment 1: Indices 8-11
+    source_c[8:12] += np.linspace(0, 4, 4)
+    # Segment 2: Indices 35-38
+    source_c[35:39] -= np.linspace(0, 3, 4)
+    
+    # 3. Plateau Phase: 5 ticks of repeated values
+    plateau_val = float(source_c[20])
+    source_c[21:26] = plateau_val
 
     result = pd.DataFrame({
-        "timestamp": df["timestamp"].values,
+        "timestamp": timestamps,
         "Source_A":  source_a,
         "Source_B":  source_b,
         "Source_C":  source_c,
