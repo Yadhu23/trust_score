@@ -197,7 +197,7 @@ with st.sidebar:
         st.success(f"**Expectation:** {sc_cfg['expected']}")
     elif mode == "📡 Live API Mode":
         st.info("Streaming real-world BTC/USD price data across 3 simulated sources.")
-        if st.button("🗑️ Reset Live Stream", use_container_width=True):
+        if st.button("🗑️ Reset Live Stream", width="stretch"):
             st.session_state.live_records = []
             st.session_state.live_tick = 0
             st.session_state.streaming = False
@@ -248,14 +248,14 @@ elif mode == "📡 Live API Mode":
     c1, c2 = st.columns([1, 2])
     with c1:
         if not st.session_state.streaming:
-            if st.button("▶️ Start Live Stream", use_container_width=True):
+            if st.button("▶️ Start Live Stream", width="stretch"):
                 reset_realtime_state()
                 st.session_state.live_records = []
                 st.session_state.live_tick = 0
                 st.session_state.streaming = True
                 st.rerun()
         else:
-            if st.button("⏹️ Stop Live Stream", use_container_width=True):
+            if st.button("⏹️ Stop Live Stream", width="stretch"):
                 st.session_state.streaming = False
                 st.rerun()
     
@@ -361,7 +361,7 @@ elif mode == "🧪 Stress Lab":
     sl1, sl2 = st.columns(2)
     with sl1:
         if not st.session_state.running:
-            if st.button("▶ Run Scenario", use_container_width=True):
+            if st.button("▶ Run Scenario", width="stretch"):
                 reset_realtime_state()
                 st.session_state.records = []
                 st.session_state.tick = 0
@@ -370,11 +370,11 @@ elif mode == "🧪 Stress Lab":
                 st.session_state.running = True
                 st.rerun()
         else:
-            if st.button("⏹ Stop Lab", use_container_width=True):
+            if st.button("⏹ Stop Lab", width="stretch"):
                 st.session_state.running = False
                 st.rerun()
     with sl2:
-        if st.button("🔄 Clear Lab History", use_container_width=True):
+        if st.button("🔄 Clear Lab History", width="stretch"):
             st.session_state.records = []
             st.session_state.tick = 0
             st.rerun()
