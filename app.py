@@ -233,6 +233,7 @@ def init_session_state():
     if "trigger_collusion" not in st.session_state: st.session_state.trigger_collusion = False
     if "trigger_chaos" not in st.session_state: st.session_state.trigger_chaos = False
     if "last_mode" not in st.session_state: st.session_state.last_mode = None
+    if "final_decision_data" not in st.session_state: st.session_state.final_decision_data = None
 
 init_session_state()
 
@@ -253,8 +254,8 @@ with st.sidebar:
         st.session_state.test_tick = 0
         st.session_state.test_running = False
         st.session_state.trigger_spike = False
-        st.session_state.trigger_collusion = False
         st.session_state.trigger_chaos = False
+        st.session_state.final_decision_data = None
         reset_realtime_state()
         st.toast(f"Mode switched to {mode}.", icon="🔄")
     st.session_state.last_mode = mode
@@ -268,6 +269,7 @@ with st.sidebar:
             st.session_state.live_records = []
             st.session_state.live_tick = 0
             st.session_state.streaming = False
+            st.session_state.final_decision_data = None
             reset_realtime_state()
             st.rerun()
 
@@ -284,9 +286,10 @@ elif mode == "📂 CSV Mode":
 # ─────────────────────────────────────────────────────────────
 # POST-RENDER (Global Components)
 # ─────────────────────────────────────────────────────────────
-st.divider()
-if st.session_state.get("final_decision_data") is not None:
-    render_final_system_decision(st.session_state.final_decision_data)
+if mode != "🧪 Test Scenario Mode":
+    st.divider()
+    if st.session_state.get("final_decision_data") is not None:
+        render_final_system_decision(st.session_state.final_decision_data)
 
 st.divider()
 # Continuous Update Loop

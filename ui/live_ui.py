@@ -128,15 +128,17 @@ def render_live_ui():
             
             # Rec source for highlighting
             rec_src_name = None
-            if "final_decision_data" in st.session_state:
+            if "final_decision_data" in st.session_state and st.session_state.final_decision_data is not None:
                 fd_data = st.session_state.final_decision_data
-                active = fd_data[~fd_data['decision'].str.contains("Isolate", na=False)]
-                if not active.empty:
-                    if 'historic_trust' in active.columns and 'reliability_index' in active.columns:
-                        active = active.copy()
-                        active['h_score'] = 0.7 * active['historic_trust'] + 0.3 * active['reliability_index']
-                        rec_src_row = active.loc[active['h_score'].idxmax()]
-                        rec_src_name = rec_src_row['source']
+                if isinstance(fd_data, pd.DataFrame) and not fd_data.empty:
+                    # Filter for non-isolated sources
+                    active = fd_data[~fd_data['decision'].str.contains("Isolate", na=False)]
+                    if not active.empty:
+                        if 'historic_trust' in active.columns and 'reliability_index' in active.columns:
+                            active = active.copy()
+                            active['h_score'] = 0.7 * active['historic_trust'] + 0.3 * active['reliability_index']
+                            rec_src_row = active.loc[active['h_score'].idxmax()]
+                            rec_src_name = rec_src_row['source']
 
             source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
 
@@ -185,8 +187,17 @@ def render_live_ui():
                                 </div>
                             </div>
                             <div style="margin-top:15px; text-align:center;">
-                                <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Live stream</p>
+                                <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Measured Value</p>
                                 <p style="margin:5px 0; font-size:2rem; font-weight:800; font-family:'JetBrains Mono';">${val:,.2f}</p>
+                            </div>
+                            <div style="margin-top:15px; background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px solid var(--border-color);">
+                                <p style="margin:0; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Trust Confidence</p>
+                                <div style="display:flex; align-items:center; gap:10px; margin-top:5px;">
+                                    <div style="flex:1; height:6px; background:rgba(255,255,255,0.05); border-radius:3px;">
+                                        <div style="width:{score*100}%; height:100%; background:{color}; border-radius:3px; box-shadow: 0 0 10px {color}88;"></div>
+                                    </div>
+                                    <span style="font-size:0.9rem; font-weight:800; color:{color};">{score*100:.1f}%</span>
+                                </div>
                             </div>
                         </div>
                     ''', unsafe_allow_html=True)

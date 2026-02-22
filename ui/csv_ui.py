@@ -11,6 +11,7 @@ def render_csv_ui(uploaded_file):
     st.warning("📂 CSV ANALYSIS MODE")
 
     if uploaded_file is None:
+        st.session_state.final_decision_data = None
         st.info(
             "👈 Upload a CSV file using the sidebar to get started.  \n"
             "A `sample_data.csv` file is included in the project for a quick demo."
@@ -40,14 +41,20 @@ def render_csv_ui(uploaded_file):
 
         # ── Run the trust pipeline ───────────────────────────────────
         with st.spinner("Simulating sources and running TrustLayer analysis…"):
-            sim_df = simulate_sources(raw_df)
             results = run_trust_pipeline(raw_df)
+            # Ensure timestamp is datetime for robust plotting
+            results["timestamp"] = pd.to_datetime(results["timestamp"], errors="coerce")
+            
+            # Reconstruct sim_df from long-format results for backward compatibility in the UI
+            sim_df = results.pivot(index="timestamp", columns="source", values="value").reset_index()
 
         sources = ["Source_A", "Source_B", "Source_C"]
         source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
 
-        # Compute per-source anomaly frames
-        anom_frames = {src: compute_anomaly_scores(sim_df[src]) for src in sources}
+        # Extract per-source detail frames from results
+        anom_frames = {}
+        for src in sources:
+            anom_frames[src] = results[results["source"] == src].copy()
 
         # ─────────────────────────────────────────────────────────────
         # SECTION 0 – Simulated Sources Table
@@ -131,38 +138,6 @@ def render_csv_ui(uploaded_file):
 
         st.divider()
 
-        # ─────────────────────────────────────────────────────────────
-        # SECTION 1.5 – Anomaly Analysis
-        # ─────────────────────────────────────────────────────────────
-        st.markdown('<h2 style="font-weight:800; margin:3rem 0 1.5rem 0;">🔎 Anomaly Detection Strategy</h2>', unsafe_allow_html=True)
-        st.markdown('<p style="color:var(--text-dim); margin-bottom:2rem;">Rolling window Z-score analysis (window=5) to identify temporal drift and value spikes.</p>', unsafe_allow_html=True)
-
-        anom_score_chart = pd.DataFrame(
-            {src: anom_frames[src]["anomaly_score"].values for src in sources},
-            index=sim_df["timestamp"],
-        )
-        
-        fig_anom = go.Figure()
-        for src_name in anom_score_chart.columns:
-            fig_anom.add_trace(go.Scatter(
-                x=anom_score_chart.index, y=anom_score_chart[src_name],
-                name=src_name,
-                line=dict(color=source_colors.get(src_name, "white"), width=2),
-                mode='lines'
-            ))
-        
-        fig_anom.update_layout(
-            height=300, 
-            title="Suspicion Index (0 = Normal, 1 = Anomaly)",
-            paper_bgcolor='rgba(0,0,0,0)', 
-            plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=40, b=0),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font={'color': "white"}),
-            font={'color': "white", 'family': "Outfit"},
-            xaxis=dict(showgrid=False, zeroline=False),
-            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False)
-        )
-        st.plotly_chart(fig_anom, width="stretch", config={'displayModeBar': False})
 
         # Tabs for detail
         st.markdown("**Per-Source Anomaly Detail Tables** (🔴 = anomaly row)")
@@ -170,9 +145,7 @@ def render_csv_ui(uploaded_file):
 
         for tab, src in zip(tabs, sources):
             with tab:
-                af = anom_frames[src].copy()
-                af.insert(0, "timestamp", sim_df["timestamp"].values)
-                af.insert(1, "value",     sim_df[src].values)
+                af = anom_frames[src] # Taken from results earlier
 
                 n_anom = int(af["is_anomaly"].sum())
                 if n_anom == 0:
@@ -208,33 +181,7 @@ def render_csv_ui(uploaded_file):
         st.markdown("> 💡 When **Source C spikes**, its deviation from the median is large → its consensus score drops near **0**.")
 
         consensus_df = compute_consensus_scores(sim_df)
-        chart_cons = pd.DataFrame(
-            {
-                "Source_A": consensus_df["consensus_score_A"].values,
-                "Source_B": consensus_df["consensus_score_B"].values,
-                "Source_C": consensus_df["consensus_score_C"].values,
-            },
-            index=sim_df["timestamp"],
-        )
-        st.markdown('<h3 style="font-weight:700; margin:2.5rem 0 1rem 0;">🤝 Consensus Score Over Time</h3>', unsafe_allow_html=True)
-        
-        fig_cons = go.Figure()
-        for src_name in chart_cons.columns:
-            fig_cons.add_trace(go.Scatter(
-                x=chart_cons.index, y=chart_cons[src_name],
-                name=src_name,
-                line=dict(color=source_colors.get(src_name, "white"), width=2, dash='dot' if src_name == 'Source_C' else 'solid'),
-                mode='lines'
-            ))
-        
-        fig_cons.update_layout(
-            height=300, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=20, b=0),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font={'color': "white"}),
-            font={'color': "white", 'family': "Inter"},
-            xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)")
-        )
-        st.plotly_chart(fig_cons, width="stretch", config={'displayModeBar': False})
+        chart_cons = results.pivot(index="timestamp", columns="source", values="consensus_score")
 
         # Summary Metrics
         LOW_CONS_THRESHOLD = 0.3
@@ -249,37 +196,47 @@ def render_csv_ui(uploaded_file):
         st.divider()
 
         # ─────────────────────────────────────────────────────────────
-        # HISTORICAL & FINAL SCORES
+        # SECTION 1.8 – Historical Belief Evolution
         # ─────────────────────────────────────────────────────────────
-        st.header("📈 Historical Trust Update")
-        
-        # Chart 1: Historical trust
-        hist_pivot = results.pivot(index="timestamp", columns="source", values="historical_trust")
-        fig_hist = go.Figure()
-        for src_name in hist_pivot.columns:
-            fig_hist.add_trace(go.Scatter(x=hist_pivot.index, y=hist_pivot[src_name], name=src_name, line=dict(color=source_colors.get(src_name, "white"), width=3)))
-        fig_hist.update_layout(height=300, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=20, b=0), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig_hist, key="hist_plotly", width="stretch")
+        st.markdown('<h2 style="font-weight:800; margin:3rem 0 1.5rem 0;">📉 Historical Belief Evolution</h2>', unsafe_allow_html=True)
+        st.markdown('<p style="color:var(--text-dim); margin-bottom:2rem;">Visualization of how the engine\'s trust in each source evolved over the course of the dataset.</p>', unsafe_allow_html=True)
 
-        # Chart 2: Final trust
         trust_final_pivot = results.pivot(index="timestamp", columns="source", values="final_score")
         fig_final = go.Figure()
         for src_name in trust_final_pivot.columns:
-            fig_final.add_trace(go.Scatter(x=trust_final_pivot.index, y=trust_final_pivot[src_name], name=src_name, line=dict(color=source_colors.get(src_name, "white"), width=3)))
-        fig_final.add_hline(y=0.75, line_dash="dash", line_color="var(--trusted-green)")
-        fig_final.add_hline(y=0.40, line_dash="dash", line_color="var(--isolate-red)")
-        fig_final.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=20, b=0))
-        st.plotly_chart(fig_final, key="final_plotly", width="stretch")
+            fig_final.add_trace(go.Scatter(
+                x=trust_final_pivot.index, 
+                y=trust_final_pivot[src_name], 
+                name=src_name, 
+                line=dict(color=source_colors.get(src_name, "white"), width=3)
+            ))
+        
+        # Horizontal lines for thresholds
+        fig_final.add_hline(y=0.75, line_dash="dash", line_color="var(--trusted-green)", annotation={"text": "Trust Threshold", "font_color": "var(--trusted-green)"})
+        fig_final.add_hline(y=0.40, line_dash="dash", line_color="var(--isolate-red)", annotation={"text": "Isolation Threshold", "font_color": "var(--isolate-red)"})
+        
+        fig_final.update_layout(
+            height=400, 
+            paper_bgcolor='rgba(0,0,0,0)', 
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=30, b=0),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font={'color': "white"}),
+            font={'color': "white", 'family': "Inter"},
+            xaxis=dict(showgrid=False), 
+            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", range=[0, 1.05])
+        )
+        st.plotly_chart(fig_final, key="belief_evolution_plotly", width="stretch", config={'displayModeBar': False})
 
         # ── Update Session State for Final Decision (CSV Mode) ─────────
-        ranking = (
-            results.groupby("source", group_keys=False)
-            .apply(lambda g: g.sort_values("timestamp").iloc[[-1]])
-            .reset_index(drop=True)[["source", "final_score", "historical_trust",
-                                       "anomaly_score", "consensus_score", "decision"]]
-            .sort_values("final_score", ascending=False)
-            .reset_index(drop=True)
-        )
+        latest_records = []
+        for src in sources:
+            src_res = results[results["source"] == src].sort_values("timestamp")
+            if not src_res.empty:
+                latest_records.append(src_res.iloc[-1])
+        
+        ranking = pd.DataFrame(latest_records)
+        ranking = ranking[["source", "final_score", "historical_trust", "anomaly_score", "consensus_score", "decision"]]
+        ranking = ranking.sort_values("source").reset_index(drop=True)
         csv_latest_vals = results[results["timestamp"] == results["timestamp"].max()]
         fd_data = pd.merge(ranking, csv_latest_vals[["source", "value"]], on="source")
         st.session_state.final_decision_data = fd_data

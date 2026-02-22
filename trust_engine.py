@@ -63,7 +63,7 @@ def simulate_live_sources(
 
     Design:
       true_value  = base_price + stochastic drift (±0.15% std)
-      Source_A    = small Gaussian noise (±0.4% std) + 5% stale-repeat chance
+      Source_A    = Zero noise (perfect ground truth)
       Source_B    = medium noise (±0.8% std) + 20% chance of shared bias with A + 5% stale
       Source_C    = medium noise (±0.5% std) + 15% spike chance (±5%) + 5% stale
       inject_source → forces a ±4% shock on that source (disturbance demo)
@@ -83,9 +83,8 @@ def simulate_live_sources(
             return last
         return new_val
 
-    # ── Source A — high-quality, small noise ──────────────────────────────────
-    val_a = _maybe_stale("Source_A",
-                         true_value + rng.normal(0, 0.004 * true_value))
+    # ── Source A — high-quality, zero noise ──────────────────────────────────
+    val_a = true_value
 
     # ── Source B — medium quality + 20% chance of shared bias with A ──────────
     shared_bias = rng.normal(0, 0.003 * true_value) if rng.random() < 0.20 else 0.0

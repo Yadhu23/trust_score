@@ -8,19 +8,29 @@ def _render_interp_card(src, val, final, decision, conclusion):
     source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
     color = source_colors.get(src, "var(--accent-blue)")
     
-    st.markdown(f"""
-        <div class="glass-card" style="padding: 15px; border-top: 4px solid {color}; margin-bottom:15px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <span style="font-weight:700; color:{color};">{src}</span>
-                <span class="badge badge-{'trusted' if 'Trusted' in decision else 'monitor' if 'Monitor' in decision else 'isolate'}">{decision}</span>
-            </div>
-            <p style="font-size:1.6rem; font-weight:800; margin:5px 0;">{val}</p>
-            <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px dashed var(--border-color);">
-                 <p style="margin:0; font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;">Conclusion</p>
-                 <p style="margin:5px 0 0 0; font-size:0.85rem; font-weight:600;">{conclusion}</p>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="glass-card" style="padding: 15px; border-top: 4px solid {color}; margin-bottom:15px;">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+<span style="font-weight:700; color:{color};">{src}</span>
+<span class="badge badge-{'trusted' if 'Trusted' in decision else 'monitor' if 'Monitor' in decision else 'isolate'}">{decision}</span>
+</div>
+<div style="margin: 10px 0;">
+<p style="margin:0; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Measured Value</p>
+<p style="margin:0; font-size:1.6rem; font-weight:800;">{val}</p>
+</div>
+<div style="margin: 10px 0; background:rgba(255,255,255,0.02); padding:8px; border-radius:6px; border:1px solid var(--border-color);">
+<p style="margin:0; font-size:0.65rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Trust Confidence</p>
+<div style="display:flex; align-items:center; gap:8px; margin-top:2px;">
+<div style="flex:1; height:4px; background:rgba(255,255,255,0.05); border-radius:2px;">
+<div style="width:{final*100}%; height:100%; background:{color}; border-radius:2px;"></div>
+</div>
+<span style="font-size:0.8rem; font-weight:800; color:{color};">{final*100:.1f}%</span>
+</div>
+</div>
+<div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px dashed var(--border-color);">
+<p style="margin:0; font-size:0.7rem; font-weight:700; color:var(--text-dim); text-transform:uppercase;">Conclusion</p>
+<p style="margin:5px 0 0 0; font-size:0.85rem; font-weight:600;">{conclusion}</p>
+</div>
+</div>""", unsafe_allow_html=True)
 
 def render_final_system_decision(latest_df):
     """
@@ -29,7 +39,7 @@ def render_final_system_decision(latest_df):
     if latest_df is None or latest_df.empty:
         return
 
-    # ── 1. Aggregate Statistics & Calculations ──────────────────
+    latest_df = latest_df.sort_values("source").copy()
     score_col = 'trust_score' if 'trust_score' in latest_df.columns else 'smoothed' if 'smoothed' in latest_df.columns else 'final_score'
     avg_conf = latest_df[score_col].mean()
     
@@ -73,26 +83,41 @@ def render_final_system_decision(latest_df):
             else:
                 best_source = active_sources.loc[active_sources[score_col].idxmax()]
 
-    # ── 2. Top Bar Navigation ──────────────────────────────────
-    st.markdown(
-        f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-            <div class="glass-card" style="padding: 12px 24px; flex: 1; margin-right: 15px; border-left: 4px solid {conf_col};">
-                <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em;">System Status</p>
-                <p style="margin:5px 0 0 0; font-size:1.2rem; font-weight:800;">{status_icon} {status}</p>
+    # ── 2. Per-Source Detail Bar ─────────────────────────────────
+    source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
+    
+    # Create columns for sources
+    cols = st.columns(len(latest_df) + 1)
+    
+    for i, (_, row) in enumerate(latest_df.iterrows()):
+        src = row['source']
+        score = row[score_col]
+        decision = row['decision']
+        color = source_colors.get(src, "var(--accent-blue)")
+        
+        # Determine status icon for this source
+        if "Trusted" in decision:   s_icon = "🟢"
+        elif "Monitor" in decision: s_icon = "🟡"
+        else:                       s_icon = "🔴"
+        
+        with cols[i]:
+            st.markdown(f"""
+                <div class="glass-card" style="padding: 10px 15px; border-left: 3px solid {color}; margin-bottom: 10px;">
+                    <p style="margin:0; font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">{src}</p>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+                        <span style="font-size:0.8rem; font-weight:800;">{s_icon} {decision.split()[-1]}</span>
+                        <span style="font-size:0.8rem; font-weight:800; color:{color};">{score*100:.1f}%</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+    with cols[-1]:
+        st.markdown(f"""
+            <div class="glass-card" style="padding: 10px 15px; border-left: 3px solid var(--accent-purple); display:flex; flex-direction:column; justify-content:center; height: 100%;">
+                <p style="margin:0; font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">System Clock</p>
+                <p style="margin:2px 0 0 0; font-size:0.9rem; font-weight:800; font-family:'JetBrains Mono';">{time.strftime("%H:%M:%S")}</p>
             </div>
-            <div class="glass-card" style="padding: 12px 24px; flex: 1; margin-right: 15px;">
-                <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em;">Engine Confidence</p>
-                <p style="margin:5px 0 0 0; font-size:1.2rem; font-weight:800; color:{conf_col};">{avg_conf*100:.1f}%</p>
-            </div>
-            <div class="glass-card" style="padding: 12px 24px; flex: 1;">
-                <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em;">System Clock</p>
-                <p style="margin:5px 0 0 0; font-size:1.2rem; font-weight:800; font-family:'JetBrains Mono';">{time.strftime("%H:%M:%S")}</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        """, unsafe_allow_html=True)
 
     # ── 3. Main Decision Block ──────────────────────────────────
     st.markdown('<h3 style="font-weight:700; margin-bottom:1.5rem;">🏆 Consensus Intelligence</h3>', unsafe_allow_html=True)
@@ -220,24 +245,9 @@ def _render_interpretation(
     hist = interp["historic_assessment"]
     behv = interp["current_behavior"]
 
-    st.markdown(
-        f"""
-        <div style="background:#12172a; border-left:3px solid #7eb8f7;
-                    border-radius:10px; padding:18px 24px; margin-top:12px;
-                    font-size:16px; line-height:1.8; border:1px solid #30363d;">
-          <div class="metric-sub-header" style="color:var(--text-dim); font-size:0.75rem; font-weight:700; text-transform:uppercase; margin-bottom:10px;">
-            📋 Engine Interpretation
-          </div>
-          <div style="margin-bottom:8px;">🕰 <b>Historic Assessment:</b>&nbsp;&nbsp;
-            {hist_icons.get(hist, '—')} {hist}
-          </div>
-          <div style="margin-bottom:8px;">📡 <b>Current Behavior:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-            {behav_icons.get(behv, '—')} {behv}
-          </div>
-          <div style="margin-bottom:4px;">🧠 <b>Engine Conclusion:</b>&nbsp;&nbsp;&nbsp;&nbsp;
-            {rec_icons.get(rec, '—')} <b style="color:#FFFFFF">{rec}</b>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"""<div style="background:#12172a; border-left:3px solid #7eb8f7; border-radius:10px; padding:18px 24px; margin-top:12px; font-size:16px; line-height:1.8; border:1px solid #30363d;">
+<div class="metric-sub-header" style="color:var(--text-dim); font-size:0.75rem; font-weight:700; text-transform:uppercase; margin-bottom:10px;">📋 Engine Interpretation</div>
+<div style="margin-bottom:8px;">🕰 <b>Historic Assessment:</b>&nbsp;&nbsp; {hist_icons.get(hist, '—')} {hist}</div>
+<div style="margin-bottom:8px;">📡 <b>Current Behavior:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {behav_icons.get(behv, '—')} {behv}</div>
+<div style="margin-bottom:4px;">🧠 <b>Engine Conclusion:</b>&nbsp;&nbsp;&nbsp;&nbsp; {rec_icons.get(rec, '—')} <b style="color:#FFFFFF">{rec}</b></div>
+</div>""", unsafe_allow_html=True)
