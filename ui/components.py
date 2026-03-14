@@ -263,3 +263,62 @@ def _render_interpretation(
 <div style="margin-bottom:8px;">📡 <b>Current Behavior:</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {behav_icons.get(behv, '—')} {behv}</div>
 <div style="margin-bottom:4px;">🧠 <b>Engine Conclusion:</b>&nbsp;&nbsp;&nbsp;&nbsp; {rec_icons.get(rec, '—')} <b style="color:#FFFFFF">{rec}</b></div>
 </div>""", unsafe_allow_html=True)
+
+
+def render_insight_summary(insight: dict):
+    """
+    Renders the 'Final System Insight – Last 40 Ticks' dashboard panel.
+
+    `insight` is the dict returned by trust_engine.compute_recent_insight().
+    Pure display — no engine logic here.
+    """
+    if not insight:
+        return
+
+    SOURCE_COLORS = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#ff7b72"}
+
+    def _color(src):
+        return SOURCE_COLORS.get(src, "#58a6ff")
+
+    st.markdown(
+        '<h2 style="background:linear-gradient(90deg,#58a6ff,#bc8cff);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
+        'font-weight:800;margin:3rem 0 1.5rem 0;">'
+        '🧬 Final System Insight – Last 40 Ticks</h2>',
+        unsafe_allow_html=True,
+    )
+
+    rows = [
+        ("🕰️ Historically Stable",   "historically_stable_source",   "Highest historic trust ratio",          "#3fb950"),
+        ("📡 Currently Stable",       "currently_stable_source",       "Highest smoothed score this session",   "#58a6ff"),
+        ("🏆 Recommended Primary",    "recommended_primary_source",    "Best (reliability + historic) / 2",     "#bc8cff"),
+        ("🚫 Source to Avoid",        "avoid_source",                  "Lowest combined reliability score",     "#f85149"),
+    ]
+
+    cols = st.columns(4)
+    for col, (label, key, note, accent) in zip(cols, rows):
+        src = insight.get(key, "—")
+        src_color = _color(src)
+        scores = insight.get("_scores", {}).get(src, {})
+        hist_pct    = f'{scores.get("historic_trust", 0)*100:.1f}%' if scores else "—"
+        smooth_pct  = f'{scores.get("smoothed_score", 0)*100:.1f}%' if scores else "—"
+        combined_pct= f'{scores.get("combined_score", 0)*100:.1f}%' if scores else "—"
+
+        with col:
+            st.markdown(
+                f'<div style="background:rgba(22,27,34,0.85);border:1px solid {accent};'
+                f'border-top:4px solid {accent};border-radius:16px;padding:20px;">'
+                f'<p style="margin:0;font-size:0.72rem;color:#8b949e;text-transform:uppercase;'
+                f'font-weight:700;letter-spacing:0.06em;">{label}</p>'
+                f'<p style="margin:8px 0 4px;font-size:1.8rem;font-weight:800;color:{src_color};">{src}</p>'
+                f'<p style="margin:0;font-size:0.78rem;color:#8b949e;">{note}</p>'
+                f'<hr style="border-color:rgba(255,255,255,0.06);margin:12px 0 8px;">'
+                f'<div style="font-size:0.8rem;display:grid;grid-template-columns:1fr 1fr;gap:3px;">'
+                f'  <span style="color:#8b949e;">Historic</span><b style="color:{src_color};">{hist_pct}</b>'
+                f'  <span style="color:#8b949e;">Smoothed</span><b style="color:{src_color};">{smooth_pct}</b>'
+                f'  <span style="color:#8b949e;">Combined</span><b style="color:{accent};">{combined_pct}</b>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+

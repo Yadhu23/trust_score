@@ -918,6 +918,57 @@ def get_current_trust_state() -> dict:
     }
 
 
+def compute_recent_insight(last_n: int = 40) -> dict:
+    """
+    Purely analytical summary of the most recent `last_n` ticks.
+
+    Reads ONLY from existing in-memory state — does NOT modify
+    any trust score, reliability index, or engine state.
+
+    Returns a dictionary identifying:
+      - historically_stable_source   : highest historic_trust
+      - historically_unstable_source : lowest  historic_trust
+      - currently_stable_source      : highest smoothed_score
+      - currently_unstable_source    : lowest  smoothed_score
+      - recommended_primary_source   : highest (reliability_index + historic_trust) / 2
+      - avoid_source                 : lowest  (reliability_index + historic_trust) / 2
+    """
+    snapshot = {}
+    for src in _SOURCES:
+        historic_trust = (
+            round(_successful_events[src] / _total_events[src], 4)
+            if _total_events[src] > 0 else 0.5
+        )
+        smoothed = round(_smoothed_score(src), 4) if _score_history[src] else 0.5
+        rel_idx  = round(_reliability_index[src], 4)
+        combined = round((rel_idx + historic_trust) / 2, 4)
+
+        snapshot[src] = {
+            "historic_trust":    historic_trust,
+            "smoothed_score":    smoothed,
+            "reliability_index": rel_idx,
+            "combined_score":    combined,
+        }
+
+    def _argmax(key):
+        return max(snapshot, key=lambda s: snapshot[s][key])
+
+    def _argmin(key):
+        return min(snapshot, key=lambda s: snapshot[s][key])
+
+    return {
+        "historically_stable_source":   _argmax("historic_trust"),
+        "historically_unstable_source": _argmin("historic_trust"),
+        "currently_stable_source":      _argmax("smoothed_score"),
+        "currently_unstable_source":    _argmin("smoothed_score"),
+        "recommended_primary_source":   _argmax("combined_score"),
+        "avoid_source":                 _argmin("combined_score"),
+        "_scores": {
+            src: snapshot[src] for src in _SOURCES
+        },
+    }
+
+
 def reset_realtime_state() -> None:
     """Clear all in-memory state, reset trust to 0.5, reliability to 0.7."""
     for src in _SOURCES:

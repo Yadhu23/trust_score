@@ -360,5 +360,13 @@ def render_test_ui(TEST_SCENARIOS):
         _render_sc_validation(sc_name, rdf)
         
         from ui.insights import render_insights_panel
+        from trust_engine import compute_recent_insight
+        from ui.components import render_insight_summary
+        
+        st.divider()
+        # ✨ Render the new Final System Insight block
+        insight = compute_recent_insight(last_n=40)
+        render_insight_summary(insight)
+
         st.divider()
         render_insights_panel(st.session_state.test_records)

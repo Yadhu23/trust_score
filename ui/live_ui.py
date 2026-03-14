@@ -354,7 +354,15 @@ def render_live_ui():
 
     # ── Post-Simulation Insights ───────────────────────────
     from ui.insights import render_insights_panel
+    from trust_engine import compute_recent_insight
+    from ui.components import render_insight_summary
+
     if st.session_state.get("live_records"):
+        st.divider()
+        # ✨ Render the new Final System Insight block
+        insight = compute_recent_insight(last_n=40)
+        render_insight_summary(insight)
+        
         st.divider()
         st.markdown("## 🔍 Post-Run Insights")
         render_insights_panel(st.session_state.live_records)

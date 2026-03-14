@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 # Import the real-time functions from trust_engine (no ML, no DB)
-from trust_engine import process_new_data, get_current_trust_state, reset_realtime_state
+from trust_engine import process_new_data, get_current_trust_state, reset_realtime_state, compute_recent_insight
 
 # ─────────────────────────────────────────────────────────────
 # APP SETUP
@@ -152,7 +152,8 @@ def get_status():
     Useful for monitoring without submitting new data.
     """
     return {
-        "trust_state": get_current_trust_state(),
+        "trust_state":    get_current_trust_state(),
+        "recent_insight": compute_recent_insight(last_n=40),
         "note": (
             "historical_trust is the EMA trust score. "
             "buffer_length is how many data points have been submitted."
