@@ -215,19 +215,19 @@ def compute_consensus_scores(row_values: pd.DataFrame, **kwargs) -> pd.DataFrame
         for i in range(len(row_values)):
             if is_chaos_row.iloc[i]:
                 # Only consider sources actually present in the row
-                present_sources = [s for s in sources if s in row_values.columns and pd.notna(row_values.iloc[i][s])]
-                if len(present_sources) < 3:
+                row_present_sources = [s for s in sources if s in row_values.columns and pd.notna(row_values.iloc[i][s])]
+                if len(row_present_sources) < 3:
                     # Not enough sources to identify an outlier majority
                     total_chaos_mask.iloc[i] = True
                     continue
                 
-                row = row_values.iloc[i][present_sources]
+                row = row_values.iloc[i][row_present_sources]
                 # Outlier = value furthest from the primary weighted_center
                 row_devs = (row - weighted_center.iloc[i]).abs()
                 outlier_src = row_devs.idxmax()
                 
                 # Check others for stability WITHOUT the outlier
-                others = [s for s in present_sources if s != outlier_src]
+                others = [s for s in row_present_sources if s != outlier_src]
                 other_vals = row[others]
                 
                 # For 2 others, std is computable
@@ -482,17 +482,17 @@ def run_trust_pipeline(df: pd.DataFrame) -> pd.DataFrame:
             z_score       = anomaly_frames[src]["z_score"].iloc[i]
             is_anomaly    = bool(anomaly_frames[src]["is_anomaly"].iloc[i])
 
-            # Performance metric (2% tolerance)
-            tolerance = 0.02 * abs(w_cons) + 1e-9
+            # Performance metric (5% tolerance)
+            tolerance = 0.05 * abs(w_cons) + 1e-9
             perf = float(np.clip(1.0 - abs(val - w_cons) / tolerance, 0.0, 0.995))
 
-            # Historical trust update
-            # Source C specific penalty: Faster decay (alpha=0.15) for its frequent errors
-            alpha_val = 0.15 if src == "Source_C" else 0.05
-            
-            # Clamp performance and apply trust ceiling
+            # Use update_historical_trust() so CSV and Live mode
+            # use identical alpha values per source
             perf_clamped = float(np.clip(perf, 0.0, 0.995))
-            new_trust = float(np.clip((1 - alpha_val) * trust[src] + alpha_val * perf_clamped, 0.0, 0.995))
+            new_trust, _ = update_historical_trust(
+                trust[src], anom_score, cons_score,
+                performance=perf_clamped, source_id=src
+            )
             
             trust[src] = new_trust
 
@@ -802,7 +802,9 @@ def process_new_data(
     smoothed = _smoothed_score(source_id)
     
     # Extract disagreement info for classification gate
-    dis_idx = float(cons_df.iloc[0]["disagreement_index"]) if sources_ready else 0.0
+    dis_idx = 0.0
+    if sources_ready:
+        dis_idx = float(cons_df.iloc[0]["disagreement_index"])
     
     decision = classify_trust(
         smoothed, 
