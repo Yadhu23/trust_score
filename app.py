@@ -20,6 +20,7 @@ from ui.live_ui import render_live_ui
 from ui.csv_ui import render_csv_ui
 from ui.test_ui import render_test_ui
 from ui.home_ui import render_home_ui
+from ui.research_lab import render_research_lab
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -207,6 +208,26 @@ TEST_SCENARIOS = {
         "desc": "Source B is noisy initially, then stabilizes.",
         "expected": "Trust climbs back after behavior improves.",
         "max_ticks": 40
+    },
+    "Noise Injection": {
+        "desc": "All sources receive random Gaussian noise at every tick.",
+        "expected": "Trust fluctuates; sources may briefly trigger Monitor.",
+        "max_ticks": 40
+    },
+    "Data Drift": {
+        "desc": "Source C gradually drifts away from true value over the run.",
+        "expected": "Source C trust decays steadily. A and B stay trusted.",
+        "max_ticks": 40
+    },
+    "Malicious Spike": {
+        "desc": "Sudden large anomaly injected into Source B at tick 10.",
+        "expected": "Source B isolated. System protects A and C.",
+        "max_ticks": 40
+    },
+    "Delayed Source": {
+        "desc": "Source C reports stale lagged data (5-tick delay).",
+        "expected": "Consensus degrades. Source C flagged over time.",
+        "max_ticks": 40
     }
 }
 
@@ -243,7 +264,7 @@ init_session_state()
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<h2 style="font-weight:800; margin-bottom:1.5rem;">⚙️ <span class="gradient-text">Engine Control</span></h2>', unsafe_allow_html=True)
-    mode = st.radio("Navigation Mode", ["🏠 Home", "📂 CSV Mode", "📡 Live API Mode", "🧪 Test Scenario Mode"])
+    mode = st.radio("Navigation Mode", ["🏠 Home", "📂 CSV Mode", "📡 Live API Mode", "🧪 Test Scenario Mode", "🔬 Research Lab"])
     st.divider()
 
     # Reset detection
@@ -285,6 +306,8 @@ elif mode == "🧪 Test Scenario Mode":
     render_test_ui(TEST_SCENARIOS)
 elif mode == "📂 CSV Mode":
     render_csv_ui(uploaded_file)
+elif mode == "🔬 Research Lab":
+    render_research_lab()
 
 # ─────────────────────────────────────────────────────────────
 # POST-RENDER (Global Components)
@@ -296,11 +319,6 @@ if mode != "🧪 Test Scenario Mode":
 
 st.divider()
 # Continuous Update Loop
-if mode == "📡 Live API Mode" and st.session_state.get("streaming"):
-    time.sleep(2)
-    st.rerun()
-elif mode == "🧪 Test Scenario Mode" and st.session_state.get("test_running"):
-    time.sleep(0.1)
-    st.rerun()
+# Handled internally via while loops in live_ui.py and test_ui.py
 
 st.caption("TrustLayer · Built for a 20-hour hackathon · No ML · Pure stats 🛡️")

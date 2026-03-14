@@ -52,6 +52,26 @@ def render_test_ui(TEST_SCENARIOS):
             recovered = src_b["decision"].str.contains("Trusted|Monitor", na=False).any()
             rules.append({"name": "Stabilization recognized (source B recovered)", "pass": recovered})
 
+        elif sc_name == "Noise Injection":
+            # All sources should stay mostly in Monitor/Trusted (noise alone shouldn't isolate all)
+            flagged_all = rlast[rlast["decision"].str.contains("Isolate", na=False)]
+            rules.append({"name": "Not all sources isolated (noise is manageable)", "pass": len(flagged_all) < 3})
+
+        elif sc_name == "Data Drift":
+            src_c = rlast[rlast["source"] == "Source_C"]
+            drifted = src_c["decision"].str.contains("Monitor|Isolate", na=False).any()
+            rules.append({"name": "Drifting Source C flagged as Monitor/Isolate", "pass": drifted})
+
+        elif sc_name == "Malicious Spike":
+            src_b = rlast[rlast["source"] == "Source_B"]
+            flagged = src_b["decision"].str.contains("Monitor|Isolate", na=False).any()
+            rules.append({"name": "Source B flagged after malicious spike", "pass": flagged})
+
+        elif sc_name == "Delayed Source":
+            src_c = rlast[rlast["source"] == "Source_C"]
+            flagged = src_c["decision"].str.contains("Monitor|Isolate", na=False).any()
+            rules.append({"name": "Delayed Source C flagged over time", "pass": flagged})
+
         # Render Logic
         all_pass = all(r["pass"] for r in rules) if rules else False
         
@@ -111,14 +131,19 @@ def render_test_ui(TEST_SCENARIOS):
 
     st.divider()
 
+    # ── Placeholders ───────────────────────────────────────────
+    chart_placeholder = st.empty()
+    metrics_placeholder = st.empty()
+    analysis_placeholder = st.empty()
+
     # ── Simulation Loop ────────────────────────────────────────
-    if st.session_state.test_running:
+    while st.session_state.test_running:
         st.session_state.test_tick += 1
         tick = st.session_state.test_tick
         
         if tick > sc_cfg["max_ticks"]:
             st.session_state.test_running = False
-            st.rerun()
+            break
 
         # Data Generator Logic (Deterministic per Scenario)
         base = 100.0
@@ -150,6 +175,37 @@ def render_test_ui(TEST_SCENARIOS):
             v = {"Source_A": 100.0, "Source_B": 150.0, "Source_C": 200.0}
         elif sc_name == "Recovery": 
             v = {"Source_B": base+rng.normal(0,20) if tick<=20 else base+rng.normal(0,0.5), "Source_A": base, "Source_C": base}
+        elif sc_name == "Noise Injection":
+            v = {
+                "Source_A": base + rng.normal(0, 3),
+                "Source_B": base + rng.normal(0, 5),
+                "Source_C": base + rng.normal(0, 8),
+            }
+        elif sc_name == "Data Drift":
+            # Source_C drifts linearly away from base over the run
+            drift = tick * 1.5
+            v = {
+                "Source_A": base + rng.normal(0, 0.5),
+                "Source_B": base + rng.normal(0, 0.8),
+                "Source_C": base + drift + rng.normal(0, 1.0),
+            }
+        elif sc_name == "Malicious Spike":
+            # Large spike injected into Source_B at exactly tick 10
+            spike = 120.0 if tick == 10 else 0.0
+            v = {
+                "Source_A": base + rng.normal(0, 0.5),
+                "Source_B": base + spike + rng.normal(0, 0.8),
+                "Source_C": base + rng.normal(0, 1.0),
+            }
+        elif sc_name == "Delayed Source":
+            # Source_C uses a 5-tick lag (stale data)
+            buf_a = st.session_state.test_value_buffers.get("Source_A", [])
+            delayed_val = buf_a[-5] if len(buf_a) >= 5 else base
+            v = {
+                "Source_A": base + rng.normal(0, 0.5),
+                "Source_B": base + rng.normal(0, 0.8),
+                "Source_C": float(delayed_val),
+            }
         
         # Processing Pipeline
         df_row = pd.DataFrame([v])
@@ -229,69 +285,80 @@ def render_test_ui(TEST_SCENARIOS):
                 "interpretation": interp_data
             })
 
-    # ── Render Results ─────────────────────────────────────────
-    if st.session_state.test_records:
-        rdf = pd.DataFrame(st.session_state.test_records)
-        rlast = rdf[rdf["tick"] == rdf["tick"].max()]
-        
-        st.markdown(f'<h2 style="font-weight:800; margin:2rem 0 1.5rem 0;">📊 Real-time Simulation Feed (Tick: {st.session_state.test_tick} / {sc_cfg["max_ticks"]})</h2>', unsafe_allow_html=True)
-        
-        # ── Update Session State for Final Decision ───
-        st.session_state.final_decision_data = rlast
-
-        # 1. Source cards
-        rcols = st.columns(3)
-        for i, s in enumerate(["Source_A", "Source_B", "Source_C"]):
-            if s in rlast["source"].values:
-                row = rlast[rlast["source"] == s].iloc[0]
-                interp = interpret_source(
-                    row["smoothed"], 0.7, row["historical_trust"], row["final_score"], row["decision"]
+        # ── Render Results ─────────────────────────────────────────
+        if st.session_state.test_records:
+            rdf = pd.DataFrame(st.session_state.test_records)
+            rlast = rdf[rdf["tick"] == rdf["tick"].max()]
+            
+            st.session_state.final_decision_data = rlast
+            
+            with chart_placeholder.container():
+                st.markdown(f'<h2 style="font-weight:800; margin:2rem 0 1.5rem 0;">📊 Real-time Simulation Feed (Tick: {st.session_state.test_tick} / {sc_cfg["max_ticks"]})</h2>', unsafe_allow_html=True)
+                st.markdown('<h3 style="font-weight:700; margin:0 0 1.5rem 0;">📈 Trust Evolution</h3>', unsafe_allow_html=True)
+                
+                pivot_test = rdf.pivot_table(index="tick", columns="source", values="smoothed")
+                fig_test = go.Figure()
+                source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
+                
+                # Threshold bands
+                fig_test.add_hrect(y0=0.80, y1=1.00, fillcolor="green", opacity=0.1, line_width=0)
+                fig_test.add_hrect(y0=0.45, y1=0.80, fillcolor="yellow", opacity=0.05, line_width=0)
+                fig_test.add_hrect(y0=0.00, y1=0.45, fillcolor="red", opacity=0.1, line_width=0)
+                
+                for src_name in pivot_test.columns:
+                    fig_test.add_trace(go.Scatter(
+                        x=pivot_test.index, y=pivot_test[src_name],
+                        name=src_name,
+                        line=dict(color=source_colors.get(src_name, "white"), width=3),
+                        mode='lines'
+                    ))
+                
+                fig_test.update_layout(
+                    height=350, 
+                    template='plotly_dark',
+                    paper_bgcolor='rgba(0,0,0,0)', 
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font={'color': "white"}),
+                    font={'color': "white", 'family': "Outfit"},
+                    xaxis=dict(showgrid=False, zeroline=False, title="Simulation Tick"),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False, title="Trust Score", range=[0, 1])
                 )
-                with rcols[i]:
-                    _render_interp_card(s, f"{row['value']:.2f}", row["final_score"], row["decision"], interp["recommendation"])
-            else:
-                with rcols[i]: 
-                    st.markdown(f'<div class="glass-card" style="padding:20px; text-align:center;"><p style="margin:0; color:var(--text-dim);">{s}</p><p style="font-size:1.2rem; font-weight:800;">OFFLINE</p></div>', unsafe_allow_html=True)
+                st.plotly_chart(fig_test, key=f"test_chart_{st.session_state.test_tick}", width="stretch", config={'displayModeBar': False})
+
+            with metrics_placeholder.container():
+                rcols = st.columns(3)
+                for i, s in enumerate(["Source_A", "Source_B", "Source_C"]):
+                    if s in rlast["source"].values:
+                        row = rlast[rlast["source"] == s].iloc[0]
+                        interp = interpret_source(
+                            row["smoothed"], 0.7, row["historical_trust"], row["final_score"], row["decision"]
+                        )
+                        with rcols[i]:
+                            _render_interp_card(s, f"{row['value']:.2f}", row["final_score"], row["decision"], interp["recommendation"])
+                    else:
+                        with rcols[i]: 
+                            st.markdown(f'<div class="glass-card" style="padding:20px; text-align:center;"><p style="margin:0; color:var(--text-dim);">{s}</p><p style="font-size:1.2rem; font-weight:800;">OFFLINE</p></div>', unsafe_allow_html=True)
+            
+            with analysis_placeholder.container():
+                st.divider()
+                st.markdown('<h3 style="font-weight:700; margin:1rem 0 1.5rem 0;">🏆 Intelligence Ranking</h3>', unsafe_allow_html=True)
+                ranking = rlast[["source", "final_score", "historical_trust", "anomaly_score", "consensus_score", "decision"]].copy()
+                ranking = ranking.sort_values("final_score", ascending=False).reset_index(drop=True)
+                ranking.index = ranking.index + 1
+                st.dataframe(ranking.style.format({
+                    "final_score": "{:.3f}", "historical_trust": "{:.3f}", 
+                    "anomaly_score": "{:.3f}", "consensus_score": "{:.3f}"
+                }), width="stretch")
+
+        import time
+        time.sleep(0.3)
+
+    # ── Global Validation Summary (Post-Simulation) ────────────
+    if st.session_state.get("test_records") and not st.session_state.get("test_running"):
+        rdf = pd.DataFrame(st.session_state.test_records)
+        _render_sc_validation(sc_name, rdf)
         
+        from ui.insights import render_insights_panel
         st.divider()
-        
-        # 2. Trust evolution chart
-        st.markdown('<h3 style="font-weight:700; margin:2rem 0 1.5rem 0;">📈 Trust Evolution</h3>', unsafe_allow_html=True)
-        pivot_test = rdf.pivot_table(index="tick", columns="source", values="smoothed")
-        
-        fig_test = go.Figure()
-        source_colors = {"Source_A": "#58a6ff", "Source_B": "#bc8cff", "Source_C": "#f85149"}
-        
-        for src_name in pivot_test.columns:
-            fig_test.add_trace(go.Scatter(
-                x=pivot_test.index, y=pivot_test[src_name],
-                name=src_name,
-                line=dict(color=source_colors.get(src_name, "white"), width=3),
-                mode='lines'
-            ))
-        
-        fig_test.update_layout(
-            height=350, 
-            paper_bgcolor='rgba(0,0,0,0)', 
-            plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=10, b=0),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font={'color': "white"}),
-            font={'color': "white", 'family': "Outfit"},
-            xaxis=dict(showgrid=False, zeroline=False, title="Simulation Tick"),
-            yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False, title="Trust Score")
-        )
-        st.plotly_chart(fig_test, key=f"test_chart_{st.session_state.test_tick}", width="stretch", config={'displayModeBar': False})
-
-        # 3. Ranking Table
-        st.markdown('<h3 style="font-weight:700; margin:2rem 0 1.5rem 0;">🏆 Intelligence Ranking</h3>', unsafe_allow_html=True)
-        ranking = rlast[["source", "final_score", "historical_trust", "anomaly_score", "consensus_score", "decision"]].copy()
-        ranking = ranking.sort_values("final_score", ascending=False).reset_index(drop=True)
-        ranking.index = ranking.index + 1
-        st.dataframe(ranking.style.format({
-            "final_score": "{:.3f}", "historical_trust": "{:.3f}", 
-            "anomaly_score": "{:.3f}", "consensus_score": "{:.3f}"
-        }), width="stretch")
-
-        # 4. Global Validation Summary
-        if st.session_state.test_tick == sc_cfg["max_ticks"]:
-            _render_sc_validation(sc_name, rdf)
+        render_insights_panel(st.session_state.test_records)

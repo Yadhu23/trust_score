@@ -1,279 +1,102 @@
-# 🧠 TrustLayer – Statistical Multi-Source Data Trust Engine
+# 🛡️ TrustLayer Lab – Statistical Multi-Source Data Trust Engine
 
-TrustLayer is a lightweight system that evaluates the **reliability of multiple data sources** and assigns **dynamic trust scores** using statistical analysis.
-
-The system detects inconsistencies, anomalies, and unreliable sources while elevating the **most trustworthy source of data**.
-
-This project demonstrates how **statistical trust modelling** can be used instead of heavy machine learning models for real-time reliability evaluation.
+> A real-time data reliability analysis laboratory. No machine learning — pure statistics.
 
 ---
 
-# 🎯 Problem Statement
+## What Is TrustLayer?
 
-Modern systems often rely on **multiple external data sources**, such as:
+TrustLayer evaluates the reliability of multiple data sources using statistical trust scoring. It cross-references three independent data streams, detects statistical drift and anomalies, computes consensus values, and isolates untrustworthy sources — all in real time.
 
-- APIs  
-- IoT sensors  
-- third-party services  
-- financial market feeds  
-
-However, **not all sources are reliable**.
-
-Some sources may produce:
-
-- noisy data  
-- inconsistent readings  
-- malicious or manipulated values  
-- sensor drift  
-
-Traditional systems treat all sources equally, which can lead to **incorrect decisions**.
-
-TrustLayer solves this by **assigning trust scores to each source based on behavior and historical consistency.**
+Built during a 20-hour hackathon. No ML. Pure math.
 
 ---
 
-# 💡 Solution
+## Features
 
-TrustLayer introduces a **Statistical Trust Score Engine** that:
-
-- analyzes multiple incoming data streams  
-- detects anomalies and conflicts  
-- calculates dynamic trust scores  
-- tracks historical reliability  
-- identifies the most trustworthy source  
-
-Instead of heavy ML models, TrustLayer uses **explainable statistical techniques**, making it:
-
-- faster
-- transparent
-- easier to deploy
-
----
-
-# 🏗 System Architecture
-
-```
-Data Sources (A, B, C)
-        │
-        ▼
-Data Ingestion Layer
-        │
-        ▼
-Statistical Validator
-        │
-        ▼
-Trust Score Engine
-        │
-        ▼
-Consensus Builder
-        │
-        ▼
-Visualization Dashboard
-```
+| Feature | Description |
+|---------|-------------|
+| 📂 **CSV Historical Analysis** | Upload any time-series CSV — TrustLayer simulates 3 sources and runs full trust analysis |
+| 📡 **Live API Mode** | Streams real-world Bitcoin price from 3 APIs (Binance, CoinGecko, CoinCap) |
+| 🧪 **Stress Testing Lab** | 10 deterministic scenarios: stable baseline, gradual drift, malicious spike, chaos, recovery, and more |
+| 🛡️ **Trust Score Engine** | EMA-smoothed composite trust score per source updated every tick |
+| 🤝 **Consensus Engine** | Median-based consensus with deviation scoring |
+| 📡 **Deviation Monitoring** | Per-tick deviation heatmap with outlier risk badges |
+| 📊 **Historical Reliability Tracking** | Stability score, reliability %, and average deviation per source |
+| 🔍 **Explainable Trust Scoring** | Per-source breakdown of deviation penalty, variance penalty, and consistency bonus |
+| 🔬 **Research Lab** | 8-tab deep analysis dashboard: reliability, consensus viz, explanation, formula viewer, data export |
+| 📤 **Data Export** | Download full trust report as CSV or JSON |
 
 ---
 
-# ⚙ Features
-
-## 📂 CSV Mode – Static Data Analysis
-
-Upload a CSV dataset and simulate multiple data sources.
-
-Example dataset:
-
-| timestamp | value |
-|----------|------|
-| t1 | 100 |
-| t2 | 102 |
-| t3 | 101 |
-
-Simulated sources:
-
-- **Source A** → Original data  
-- **Source B** → Original + small Gaussian noise  
-- **Source C** → Highly inconsistent data  
-
-The engine evaluates trust scores for each source.
-
----
-
-## 📡 Live API Mode – Real-Time Data
-
-TrustLayer can fetch **live external data feeds** (example: cryptocurrency price APIs).
-
-Multiple simulated sources pull the same feed with variations and the engine evaluates:
-
-- source consistency
-- deviation patterns
-- real-time trust scores
-
----
-
-## 🧪 Stress Testing Lab
-
-A simulation environment to test system robustness.
-
-Example scenarios:
-
-- noisy sensors  
-- manipulated data spikes  
-- drifting values  
-- conflicting sources  
-
-This helps validate how the trust engine behaves under **extreme conditions**.
-
----
-
-# 📊 Trust Score Methodology
-
-Each source receives a **dynamic trust score** based on the following factors.
-
-### 1. Deviation from Consensus
-
-Values are compared against the **median consensus**.
-
-Large deviations reduce trust.
-
----
-
-### 2. Historical Accuracy
-
-Sources that historically remain close to consensus receive higher trust.
-
----
-
-### 3. Behavioral Stability
-
-Sources with consistent behavior gain trust.
-
-Frequent spikes or fluctuations reduce trust.
-
----
-
-### 4. Anomaly Detection
-
-Outlier detection penalizes unreliable sources.
-
----
-
-Example evaluation:
-
-| Source | Value | Deviation | Trust |
-|------|------|------|------|
-| A | 101 | Low | High |
-| B | 104 | Medium | Medium |
-| C | 150 | Very High | Low |
-
-Result:
-
-```
-Source A Trust Score: 92%
-Source B Trust Score: 71%
-Source C Trust Score: 18%
-
-Most Reliable Source → A
-```
-
----
-
-# 🧱 Tech Stack
-
-- Python  
-- FastAPI  
-- Pandas  
-- NumPy  
-- Streamlit (UI Dashboard)
-
----
-
-# 🚀 Installation
-
-Clone the repository
+## How to Run
 
 ```bash
-git clone https://github.com/yourusername/trustlayer.git
-cd trustlayer
-```
-
-Install dependencies
-
-```bash
+git clone <your-repo-url>
+cd trustscore
 pip install -r requirements.txt
+streamlit run app.py
 ```
 
+The app opens at `http://localhost:8501`.
+
 ---
 
-# ▶ Running the Project
+## Project Structure
 
-Run the main application
-
-```bash
-python test_app.py
+```
+trustscore/
+├── services/           # BTC API fetcher and CSV simulator
+├── ui/                 # All Streamlit UI modules
+│   ├── csv_ui.py       # CSV mode
+│   ├── live_ui.py      # Live API mode
+│   ├── test_ui.py      # Stress Lab
+│   ├── research_lab.py # Research Lab (8 analytical tabs)
+│   └── insights.py     # Post-simulation insights
+├── trust_engine.py     # ★ Core scoring engine
+├── app.py              # ★ Main entry point
+├── api.py              # FastAPI REST endpoints
+├── sample_data.csv     # Sample dataset for demo
+└── requirements.txt    # Python dependencies
 ```
 
-The interface will allow you to:
-
-- upload CSV datasets  
-- simulate multiple sources  
-- compute trust scores  
-- run stress testing scenarios  
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for full architecture documentation.
 
 ---
 
-# 🔬 Use Cases
+## Example Dataset
 
-TrustLayer can be applied in several domains:
+A `sample_data.csv` is included in the root. It contains timestamped numerical values that TrustLayer uses to simulate Sources A, B, and C (clean, noisy, and spike-prone respectively).
 
-### IoT Sensor Networks
-Detect faulty or compromised sensors.
-
-### Financial Data Systems
-Validate prices from multiple exchanges.
-
-### API Aggregation Platforms
-Identify reliable APIs.
-
-### Data Fusion Systems
-Combine multiple sources while filtering unreliable data.
+Upload it in **CSV Mode** to see a full analysis immediately.
 
 ---
 
-# 📈 Future Improvements
+## Trust Score Logic
 
-- adaptive trust weighting  
-- real-time streaming pipelines  
-- ML-based anomaly detection  
-- distributed trust scoring  
-- blockchain audit trail for trust history  
+```
+Trust Score ∈ [0.0, 1.0]
 
----
+✅ ≥ 0.80  →  Trusted
+⚠️ ≥ 0.45  →  Monitor
+🚨 < 0.45  →  Isolate
+```
 
-# 🏆 Hackathon Project
-
-TrustLayer was built as a **hackathon prototype** demonstrating how statistical techniques can be used to build a **dynamic trust evaluation system for multi-source data environments**.
-
-The focus was on:
-
-- explainability  
-- performance  
-- real-time evaluation  
-- scalability  
+Computed from: `anomaly_score × consensus_score × historical_performance_EMA`
 
 ---
 
-# 👨‍💻 Author
+## Tech Stack
 
-**Vishnu**
-
----
-
-# ⭐ Contributing
-
-Contributions are welcome.  
-Feel free to fork the repository and submit pull requests.
+- **Python** – Core logic
+- **Pandas / NumPy** – Statistical computations
+- **Streamlit** – Dashboard UI
+- **Plotly** – Interactive charts
+- **FastAPI** – Optional REST API layer
+- **Requests** – Live price feed integration
 
 ---
 
-# 📜 License
+## License
 
-This project is released under the MIT License.
+MIT License — see [LICENSE](LICENSE).

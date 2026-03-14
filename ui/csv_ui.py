@@ -75,9 +75,10 @@ def render_csv_ui(uploaded_file):
 
         def highlight_spikes(row):
             diff = abs(row["Source_C"] - row["Source_A"])
-            threshold = 2 * sim_df["Source_A"].std()
-            if diff > threshold:
-                return ["background-color: rgba(231,76,60,0.18)"] * len(row)
+            std_a = sim_df["Source_A"].std()
+            mean_a = sim_df["Source_A"].mean()
+            if abs(row["Source_C"] - mean_a) > 2 * std_a:
+                return ["background-color: rgba(248,81,73,0.3)"] * len(row)
             return [""] * len(row)
 
         st.dataframe(
@@ -87,6 +88,43 @@ def render_csv_ui(uploaded_file):
             hide_index=True,
         )
         st.caption("🔴 Red rows = Source C spike detected (deviation > 2× std of Source A)")
+
+        st.divider()
+
+        # ─────────────────────────────────────────────────────────────
+        # SECTION 0.5 – Per-Source Anomaly Detail Tables (🔴 = anomaly row)
+        # ─────────────────────────────────────────────────────────────
+        st.markdown("**Per-Source Anomaly Detail Tables** (🔴 = anomaly row)")
+        tabs = st.tabs(["Source A", "Source B", "Source C"])
+
+        for tab, src in zip(tabs, sources):
+            with tab:
+                af = anom_frames[src]
+
+                n_anom = int(af["is_anomaly"].sum())
+                if n_anom == 0:
+                    st.success(f"✅ No anomalies detected in {src}")
+                else:
+                    st.warning(f"**{n_anom} anomaly row(s)** detected in {src}.")
+
+                def _highlight_anom(row):
+                    if row["is_anomaly"]:
+                        return ["background-color: rgba(248,81,73,0.25)"] * len(row)
+                    return [""] * len(row)
+
+                display_af = af[["timestamp", "value", "rolling_mean", "rolling_std",
+                                  "z_score", "is_anomaly", "anomaly_score"]]
+                st.dataframe(
+                    display_af.style
+                        .apply(_highlight_anom, axis=1)
+                        .format({
+                            "value":        "{:.4f}", "rolling_mean": "{:.4f}",
+                            "rolling_std":  "{:.4f}", "z_score":      "{:.4f}",
+                            "anomaly_score":"{:.4f}",
+                        }),
+                    width="stretch",
+                    hide_index=True,
+                )
 
         st.divider()
 
@@ -107,34 +145,42 @@ def render_csv_ui(uploaded_file):
 
             with col:
                 st.markdown(f'''
-                    <div class="glass-card" style="padding: 20px; border-top: 4px solid {color}; margin-bottom: 20px;">
+                    <div style="background: rgba(22,27,34,0.7); border: 1px solid {color}; border-radius: 16px; padding: 24px; margin-bottom: 20px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                            <span style="font-weight:800; color:{color}; letter-spacing:0.05em;">{src}</span>
+                            <span style="font-weight:800; color:{color}; letter-spacing:0.05em; font-size:1.2rem;">{src}</span>
                             <span class="badge badge-{'trusted' if 'Trusted' in decision else 'monitor' if 'Monitor' in decision else 'isolate'}">{decision}</span>
                         </div>
-                        <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Measured Value</p>
+                        <p style="margin:0; font-size:0.8rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Measured Value</p>
                         <p style="margin:5px 0; font-size:2.4rem; font-weight:800;">{row['value']:.3f}</p>
-                        <div style="margin-top:20px; background:rgba(255,255,255,0.02); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
-                             <p style="margin:0; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Trust Score</p>
+                        <div style="margin-top:20px;">
+                             <p style="margin:0; font-size:0.8rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Trust Score</p>
                              <div style="display:flex; align-items:center; gap:10px; margin-top:5px;">
-                                <div style="flex:1; height:6px; background:rgba(255,255,255,0.05); border-radius:3px;">
-                                    <div style="width:{trust_val*100}%; height:100%; background:{color}; border-radius:3px; box-shadow:0 0 10px {color}88;"></div>
+                                <div style="flex:1; background:#1e1e2e; border-radius:4px; height:8px;">
+                                    <div style="width:{trust_val*100:.1f}%; height:8px; background:{color}; border-radius:4px; box-shadow:0 0 10px {color}88;"></div>
                                 </div>
-                                <span style="font-size:0.9rem; font-weight:800; color:{color};">{trust_val*100:.1f}%</span>
+                                <span style="font-size:1rem; font-weight:800; color:{color};">{trust_val*100:.1f}%</span>
                              </div>
                         </div>
                     </div>
                 ''', unsafe_allow_html=True)
 
-                _interp = interpret_source(float(row["final_score"]), 0.7, float(row["historical_trust"]), float(row["final_score"]), row["decision"], source_id=src)
+                _interp = interpret_source(
+                    instant_confidence=float(row["final_score"]), 
+                    reliability_index=float(row["reliability_index"]), 
+                    historic_trust=float(row["historical_trust"]), 
+                    final_score=float(row["final_score"]), 
+                    status=row["decision"], 
+                    source_id=src,
+                    weighted_mean=float(row["value"])
+                )
                 st.markdown(f'''
-                    <div class="glass-card" style="padding:15px; border-left: 3px solid {color}88;">
-                        <p style="margin:0; font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:700; margin-bottom:10px;">Engine Drilldown</p>
+                    <div style="padding:15px; border-left: 3px solid {color}88; margin-bottom:10px;">
+                        <p style="margin:0; font-size:0.8rem; color:var(--text-dim); text-transform:uppercase; font-weight:700; margin-bottom:10px;">Engine Drilldown</p>
                         <div style="display:flex; flex-direction:column; gap:8px;">
-                            <div style="font-size:0.85rem;"><span style="color:var(--text-dim);">Historical:</span> <b>{_interp["historic_assessment"]}</b></div>
-                            <div style="font-size:0.85rem;"><span style="color:var(--text-dim);">Current:</span> <b>{_interp["current_behavior"]}</b></div>
-                            <div style="margin-top:5px; padding-top:10px; border-top:1px solid var(--border-color); font-size:0.85rem; color:{color};">
-                                <b>{_interp["recommendation"]}</b>
+                            <div style="font-size:0.9rem;"><span style="color:var(--text-dim);">Historical:</span> <b>{_interp.get("historic_assessment", "")}</b></div>
+                            <div style="font-size:0.9rem;"><span style="color:var(--text-dim);">Current:</span> <b>{_interp.get("current_behavior", "")}</b></div>
+                            <div style="margin-top:5px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.05); font-size:0.95rem; color:{color}; font-weight:700;">
+                                {_interp.get("recommendation", "")}
                             </div>
                         </div>
                     </div>
@@ -143,40 +189,7 @@ def render_csv_ui(uploaded_file):
         st.divider()
 
 
-        # Tabs for detail
-        st.markdown("**Per-Source Anomaly Detail Tables** (🔴 = anomaly row)")
-        tabs = st.tabs(["Source A", "Source B", "Source C"])
 
-        for tab, src in zip(tabs, sources):
-            with tab:
-                af = anom_frames[src] # Taken from results earlier
-
-                n_anom = int(af["is_anomaly"].sum())
-                if n_anom == 0:
-                    st.success(f"No anomalies detected in {src}.")
-                else:
-                    st.warning(f"**{n_anom} anomaly row(s)** detected in {src}.")
-
-                def _highlight_anom(row):
-                    if row["is_anomaly"]:
-                        return ["background-color: rgba(231,76,60,0.22); color: #ff8080"] * len(row)
-                    return [""] * len(row)
-
-                display_af = af[["timestamp", "value", "rolling_mean", "rolling_std",
-                                  "z_score", "is_anomaly", "anomaly_score"]]
-                st.dataframe(
-                    display_af.style
-                        .apply(_highlight_anom, axis=1)
-                        .format({
-                            "value":        "{:.4f}", "rolling_mean": "{:.4f}",
-                            "rolling_std":  "{:.4f}", "z_score":      "{:.4f}",
-                            "anomaly_score":"{:.4f}",
-                        }),
-                    width="stretch",
-                    hide_index=True,
-                )
-
-        st.divider()
 
         # ─────────────────────────────────────────────────────────────
         # SECTION 1.7 – Cross-Source Consensus Scoring

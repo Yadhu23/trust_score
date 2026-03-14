@@ -90,7 +90,7 @@ def simulate_live_sources(
         return new_val
 
     # ── Source A — high-quality, zero noise ──────────────────────────────────
-    val_a = true_value
+    val_a = true_value + rng.normal(0, 0.001 * true_value)
 
     # ── Source B — medium quality + 20% chance of shared bias with A ──────────
     shared_bias = rng.normal(0, 0.003 * true_value) if rng.random() < 0.20 else 0.0
@@ -189,15 +189,17 @@ def compute_consensus_scores(row_values: pd.DataFrame, **kwargs) -> pd.DataFrame
     reliabilities = kwargs.get("reliabilities", {s: 0.7 for s in sources})
     
     # ── 1. Calculate Primary Weighted Center ─────────────────────────────────
-    total_rel = sum(reliabilities.get(s, 0.7) for s in sources)
+    present_sources = [s for s in sources if s in row_values.columns]
+
+    total_rel = sum(reliabilities.get(s, 0.7) for s in present_sources)
     if total_rel > 0:
-        weighted_center = sum(row_values[src] * reliabilities.get(src, 0.7) for src in sources) / total_rel
+        weighted_center = sum(row_values[src] * reliabilities.get(src, 0.7) for src in present_sources) / total_rel
     else:
-        weighted_center = row_values[sources].median(axis=1)
+        weighted_center = row_values[present_sources].median(axis=1)
 
     # ── 2. Disagreement & Chaos Detection (Threshold = 15% of mean) ──────────
-    disagreement_idx = row_values[sources].std(axis=1).fillna(0)
-    global_mean = row_values[sources].mean(axis=1)
+    disagreement_idx = row_values[present_sources].std(axis=1).fillna(0)
+    global_mean = row_values[present_sources].mean(axis=1)
     chaos_threshold = (global_mean * 0.15).clip(lower=5.0)
     
     # Flags for per-row status
@@ -627,15 +629,13 @@ def _compute_confidence(score: float) -> float:
       0.0 = score is exactly on a boundary (uncertain)
     Thresholds: Trusted ≥ 0.75 | Monitor 0.40–0.75 | Isolate < 0.40
     """
-    if score >= 0.75:
-        # Distance from the 0.75 boundary, normalised by max possible distance
-        return round(min((score - 0.75) / 0.25, 1.0), 4)
-    elif score >= 0.40:
-        # Distance from the nearest boundary (0.40 or 0.75)
-        dist = min(score - 0.40, 0.75 - score)
-        return round(dist / 0.175, 4)   # 0.175 = half of (0.75 - 0.40)
+    if score >= 0.80:
+        return round(min((score - 0.80) / 0.20, 1.0), 4)
+    elif score >= 0.45:
+        dist = min(score - 0.45, 0.80 - score)
+        return round(dist / 0.175, 4)
     else:
-        return round(min((0.40 - score) / 0.40, 1.0), 4)
+        return round(min((0.45 - score) / 0.45, 1.0), 4)
 
 
 def _build_reason(
@@ -784,8 +784,10 @@ def process_new_data(
 
     # Instead of binary 1/0, we use distance from the weighted consensus.
     w_consensus = compute_weighted_consensus(latest_vals, _reliability_index)
-    tolerance   = 0.02 * abs(w_consensus) + 1e-9   # 2% error tolerance
-    _perf       = float(np.clip(1.0 - abs(value - w_consensus) / tolerance, 0.0, 0.995))
+    tolerance = 0.05 * abs(w_consensus) + 1e-9
+    _perf = float(np.clip(1.0 - abs(value - w_consensus) / tolerance, 0.0, 0.995))
+    if len(_value_store[source_id]) < 3:
+        _perf = 0.5  # not enough data yet, no reward or penalty
 
     # ── Step 4: historical trust EMA ────────────────────────────
     old_trust = _trust_state[source_id]
@@ -974,37 +976,23 @@ def interpret_source(
     """
 
     anomaly_score = kwargs.get("anomaly_score", 0.0)
-    consensus_score = kwargs.get("consensus_score", 1.0) # Assume 1.0 if not provided
-    
-    # ── 1. Historic Assessment ─────────────────────────────────────────────────
-    if source_id == "Source_C" and historic_trust < 0.5:
-        historic_assessment = "Historically Unstable"
-    elif historic_trust > 0.70 or (source_id in ["Source_A", "Source_B"]):
-        historic_assessment = "Historically Reliable"
+    consensus_score = kwargs.get("consensus_score", 1.0)
+
+    # Historic Assessment
+    if historic_trust > 0.80:
+        historic_assessment = "Highly Reliable"
     elif historic_trust >= 0.65:
         historic_assessment = "Moderately Reliable"
     else:
         historic_assessment = "Historically Unstable"
 
-    # ── 2. Current Behavior ────────────────────────────────────────────────────
+    # Current Behavior
     dis_idx = kwargs.get("disagreement_index", 0.0)
     weighted_mean = kwargs.get("weighted_mean", 100.0)
     threshold = max(5.0, 0.15 * weighted_mean)
 
     if dis_idx > threshold:
         current_behavior = "Systemic Conflict (Total Disagreement)"
-    elif source_id == "Source_A" and instant_confidence > 0.75:
-        current_behavior = "Currently Consistent"
-    elif source_id == "Source_B":
-        if anomaly_score > 0.4 or consensus_score < 0.6:
-            current_behavior = "Currently Stable but Monitor"
-        else:
-            current_behavior = "Currently Consistent"
-    elif source_id == "Source_C":
-        if anomaly_score > 0.5 and consensus_score < 0.4:
-            current_behavior = "Currently Deviating"
-        else:
-            current_behavior = "Currently Consistent"
     elif instant_confidence > 0.75:
         current_behavior = "Currently Consistent"
     elif instant_confidence >= 0.45:
@@ -1012,20 +1000,15 @@ def interpret_source(
     else:
         current_behavior = "Currently Deviating"
 
-    # ── 3. Recommendation (2×2 decision matrix) ────────────────────────────────
-    # Forced behavior based on source identity and state
-    if source_id == "Source_A" and "Isolate" not in status:
+    # Recommendation — pure metric logic, no hardcoded source names
+    if "Isolate" in status:
+        recommendation = "Critical — Immediate Isolation Required"
+    elif instant_confidence > 0.80 and historic_trust > 0.75:
         recommendation = "Recommended Primary Source"
-    elif source_id == "Source_B":
-        recommendation = "Monitor"
-    elif source_id == "Source_C" and (historic_trust < 0.5 or "Isolate" in status):
-        recommendation = "Unreliable – Consider Isolation"
-    elif "Isolate" in status:
-        recommendation = "Critical – Immediate Isolation required"
-    elif instant_confidence > 0.80 and historic_trust > 0.80:
-        recommendation = "Recommended Primary Source"
+    elif instant_confidence > 0.60:
+        recommendation = "Usable — Monitor Closely"
     else:
-        recommendation = "Unreliable – Consider Isolation"
+        recommendation = "Unreliable — Consider Isolation"
 
     return {
         "historic_assessment": historic_assessment,

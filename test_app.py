@@ -259,7 +259,29 @@ elif mode == "📡 Live API Mode":
                 st.session_state.streaming = False
                 st.rerun()
     
-    if st.session_state.streaming:
+    status_placeholder = st.empty()
+    cards_placeholder = st.empty()
+    chart_placeholder = st.empty()
+
+    if st.session_state.live_records:
+        df = pd.DataFrame(st.session_state.live_records)
+        latest = df[df["tick"] == df["tick"].max()]
+        status_placeholder.subheader(f"Current BTC Price: ${latest.iloc[0]['value']:,.2f}")
+        
+        with cards_placeholder.container():
+            lcols = st.columns(3)
+            for i, src in enumerate(["Source_A", "Source_B", "Source_C"]):
+                if src in latest["source"].values:
+                    row = latest[latest["source"] == src].iloc[0]
+                    interp = interpret_source(row["final"], 0.7, row["h_trust"], row["final"], row["decision"])
+                    with lcols[i]:
+                        _render_interp_card(src, f"${row['value']:,.2f}", row["final"], row["decision"], interp["recommendation"])
+        
+        with chart_placeholder.container():
+            st.divider()
+            st.line_chart(df.pivot_table(index="tick", columns="source", values="final"))
+
+    while st.session_state.streaming:
         price = fetch_btc_price()
         sources_vals, _ = simulate_live_sources(price, st.session_state.rng)
         
@@ -293,6 +315,7 @@ elif mode == "📡 Live API Mode":
                     cs = 0.5
                     w_cons = val
             else:
+                cons_df = None
                 cs = 0.5
                 w_cons = val
 
@@ -334,23 +357,25 @@ elif mode == "📡 Live API Mode":
                 "final": smooth, "decision": decision, "h_trust": h_trust
             })
             
-        time.sleep(1.5)
-        st.rerun()
+        if st.session_state.live_records:
+            df = pd.DataFrame(st.session_state.live_records)
+            latest = df[df["tick"] == df["tick"].max()]
+            status_placeholder.subheader(f"Current BTC Price: ${latest.iloc[0]['value']:,.2f}")
+            
+            with cards_placeholder.container():
+                lcols = st.columns(3)
+                for i, src in enumerate(["Source_A", "Source_B", "Source_C"]):
+                    if src in latest["source"].values:
+                        row = latest[latest["source"] == src].iloc[0]
+                        interp = interpret_source(row["final"], 0.7, row["h_trust"], row["final"], row["decision"])
+                        with lcols[i]:
+                            _render_interp_card(src, f"${row['value']:,.2f}", row["final"], row["decision"], interp["recommendation"])
+            
+            with chart_placeholder.container():
+                st.divider()
+                st.line_chart(df.pivot_table(index="tick", columns="source", values="final"))
 
-    if st.session_state.live_records:
-        df = pd.DataFrame(st.session_state.live_records)
-        latest = df[df["tick"] == df["tick"].max()]
-        st.subheader(f"Current BTC Price: ${latest.iloc[0]['value']:,.2f}")
-        
-        lcols = st.columns(3)
-        for i, src in enumerate(["Source_A", "Source_B", "Source_C"]):
-            row = latest[latest["source"] == src].iloc[0]
-            interp = interpret_source(row["final"], 0.7, row["h_trust"], row["final"], row["decision"])
-            with lcols[i]:
-                _render_interp_card(src, f"${row['value']:,.2f}", row["final"], row["decision"], interp["recommendation"])
-        
-        st.divider()
-        st.line_chart(df.pivot_table(index="tick", columns="source", values="final"))
+        time.sleep(1.5)
 
 # ══════════════════════════════════════════════════════════════
 # 3. STRESS LAB
@@ -379,12 +404,19 @@ elif mode == "🧪 Stress Lab":
             st.session_state.tick = 0
             st.rerun()
 
-    if st.session_state.running:
+    status_placeholder = st.empty()
+    chart_placeholder = st.empty()
+    metrics_placeholder = st.empty()
+    analysis_placeholder = st.empty()
+
+    while st.session_state.running:
         st.session_state.tick += 1
         tick = st.session_state.tick
-        if tick > sc_cfg["max_ticks"]:
+        max_ticks = sc_cfg["max_ticks"]
+        
+        if tick > max_ticks:
             st.session_state.running = False
-            st.rerun()
+            break
             
         # Data Generator Logic
         base = 100.0
@@ -444,48 +476,78 @@ elif mode == "🧪 Stress Lab":
             dis_idx = float(cons_df.iloc[0]["disagreement_index"]) if cons_df is not None else 0.0
             is_ex = bool(cons_df.iloc[0]["is_extreme_chaos"]) if cons_df is not None and "is_extreme_chaos" in cons_df.columns else False
             
+            decision = classify_trust(
+                smoothed, 
+                disagreement_index=dis_idx, 
+                anomaly_score=anom,
+                weighted_mean=w_cons,
+                is_extreme_chaos=is_ex
+            )
+            
             st.session_state.records.append({
                 "tick": tick, "source": s, "value": val, "final": final,
                 "smoothed": smoothed,
-                "decision": classify_trust(
-                    smoothed, 
-                    disagreement_index=dis_idx, 
-                    anomaly_score=anom,
-                    weighted_mean=w_cons,
-                    is_extreme_chaos=is_ex
-                ), 
+                "decision": decision, 
                 "historic": new_t,
                 "disagreement_index": dis_idx,
                 "anomaly_score": anom,
                 "is_extreme_chaos": is_ex
             })
-        time.sleep(0.1)
-        st.rerun()
 
-    if st.session_state.records:
-        rdf = pd.DataFrame(st.session_state.records)
-        rlast = rdf[rdf["tick"] == rdf["tick"].max()]
-        st.subheader(f"Current Tick: {st.session_state.tick} / {sc_cfg['max_ticks']}")
-        rcols = st.columns(3)
-        for i, s in enumerate(["Source_A", "Source_B", "Source_C"]):
-            if s in rlast["source"].values:
-                row = rlast[rlast["source"] == s].iloc[0]
-                interp = interpret_source(
-                    row["final"], 
-                    0.7, 
-                    row["historic"], 
-                    row["final"], 
-                    row["decision"],
-                    disagreement_index=row.get("disagreement_index", 0.0),
-                    anomaly_score=row.get("anomaly_score", 0.0),
-                    weighted_mean=row["value"] # Best proxy if we don't store w_cons
-                )
-                with rcols[i]:
-                    _render_interp_card(s, f"{row['value']:.2f}", row["final"], row["decision"], interp["recommendation"])
-            else:
-                with rcols[i]: st.metric(s, "OFFLINE")
-        st.divider()
-        st.line_chart(rdf.pivot_table(index="tick", columns="source", values="final"))
+        if st.session_state.records:
+            rdf = pd.DataFrame(st.session_state.records)
+            rlast = rdf[rdf["tick"] == rdf["tick"].max()]
+
+            with status_placeholder.container():
+                st.subheader(f"Current Tick: {st.session_state.tick} / {sc_cfg['max_ticks']}")
+                st.progress(st.session_state.tick / sc_cfg['max_ticks'])
+
+            with chart_placeholder.container():
+                st.divider()
+                st.line_chart(rdf.pivot_table(index="tick", columns="source", values="final"))
+
+            with metrics_placeholder.container():
+                rcols = st.columns(3)
+                for i, s in enumerate(["Source_A", "Source_B", "Source_C"]):
+                    if s in rlast["source"].values:
+                        row = rlast[rlast["source"] == s].iloc[0]
+                        interp = interpret_source(
+                            row["final"], 
+                            0.7, 
+                            row["historic"], 
+                            row["final"], 
+                            row["decision"],
+                            disagreement_index=row.get("disagreement_index", 0.0),
+                            anomaly_score=row.get("anomaly_score", 0.0),
+                            weighted_mean=row["value"] # Best proxy if we don't store w_cons
+                        )
+                        with rcols[i]:
+                            _render_interp_card(s, f"{row['value']:.2f}", row["final"], row["decision"], interp["recommendation"])
+                    else:
+                        with rcols[i]: st.metric(s, "OFFLINE")
+
+            with analysis_placeholder.container():
+                st.markdown("#### 🔍 Analysis")
+                for s in ["Source_A", "Source_B", "Source_C"]:
+                    if s in rlast["source"].values:
+                        row = rlast[rlast["source"] == s].iloc[0]
+                        interp = interpret_source(
+                            row["final"], 
+                            0.7, 
+                            row["historic"], 
+                            row["final"], 
+                            row["decision"],
+                            disagreement_index=row.get("disagreement_index", 0.0),
+                            anomaly_score=row.get("anomaly_score", 0.0),
+                            weighted_mean=row["value"] # Best proxy if we don't store w_cons
+                        )
+                        with st.expander(f"{s} — {row['decision']}", expanded=True):
+                            st.write(interp.get("reason", "No reason provided."))
+
+        time.sleep(0.3)
+
+    if not st.session_state.running and st.session_state.records:
+        st.success(f"✅ Scenario complete — {st.session_state.tick} ticks")
 
 st.sidebar.divider()
 st.sidebar.caption("TrustLayer Lab Unified v1.0 🛡️")

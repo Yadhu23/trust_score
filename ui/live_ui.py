@@ -250,10 +250,11 @@ def render_live_ui():
             )
 
     # ── Initial render (if paused with data) ───────────────────
-    _render_live_state()
+    if not st.session_state.streaming:
+        _render_live_state()
 
     # ── Streaming Step ─────────────────────────────────────────
-    if st.session_state.streaming:
+    while st.session_state.streaming:
         rng = st.session_state.live_rng
         price = fetch_btc_price()
 
@@ -347,5 +348,13 @@ def render_live_ui():
                 "decision":          decision,
             })
 
-        # Re-render with new data (will be called in next loop or after rerun)
+        # Re-render with new data
         _render_live_state()
+        time.sleep(1)
+
+    # ── Post-Simulation Insights ───────────────────────────
+    from ui.insights import render_insights_panel
+    if st.session_state.get("live_records"):
+        st.divider()
+        st.markdown("## 🔍 Post-Run Insights")
+        render_insights_panel(st.session_state.live_records)
