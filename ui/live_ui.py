@@ -92,6 +92,7 @@ def render_live_ui():
     # ── Placeholders for dynamic content ───────────────────────
     status_placeholder   = st.empty()
     metrics_placeholder  = st.empty()
+    live_insight_placeholder = st.empty() # ✨ New placeholder for 40-tick insight
     chart_placeholder    = st.empty()
     table_placeholder    = st.empty()
 
@@ -202,6 +203,36 @@ def render_live_ui():
                         </div>
                     ''', unsafe_allow_html=True)
                     st.plotly_chart(fig, key=f"gauge_{src}_{latest_tick}", width="stretch", config={'displayModeBar': False})
+
+        # ── ✨ Render Final Insight (Last 40 Ticks) ───
+        import trust_engine
+        insight = trust_engine.get_live_40tick_report()
+        
+        with live_insight_placeholder.container():
+            if insight is None:
+                st.markdown(
+                    '<div style="background:rgba(22,27,34,0.85); border:1px solid #30363d; border-radius:8px; padding:20px; text-align:center; margin:1.5rem 0 1rem 0;">'
+                    '<p style="margin:0; font-size:1.1rem; color:#8b949e;">⏳ System collecting data… Insight will appear after 40 ticks.</p>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown('<h3 style="font-weight:700; margin:1.5rem 0 1rem 0; color:#bc8cff;">⏱️ FINAL SYSTEM INSIGHT – LAST 40 TICKS</h3>', unsafe_allow_html=True)
+                i_c1, i_c2, i_c3, i_c4, i_c5 = st.columns(5)
+                
+                def _insight_card(label, src, color):
+                    return f'''
+                    <div style="background:rgba(22,27,34,0.85); border:1px solid {color}; border-top:3px solid {color}; border-radius:8px; padding:12px;">
+                        <p style="margin:0; font-size:0.65rem; color:#8b949e; text-transform:uppercase; font-weight:700; line-height:1.2;">{label}</p>
+                        <p style="margin:5px 0 0; font-size:1.1rem; font-weight:800; color:{color};">{src}</p>
+                    </div>
+                    '''
+
+                with i_c1: st.markdown(_insight_card("Historically Stable Source", insight["historically_stable_source"], "#3fb950"), unsafe_allow_html=True)
+                with i_c2: st.markdown(_insight_card("Currently Stable Source", insight["currently_stable_source"], "#58a6ff"), unsafe_allow_html=True)
+                with i_c3: st.markdown(_insight_card("Recommended Primary Source", insight["recommended_primary_source"], "#bc8cff"), unsafe_allow_html=True)
+                with i_c4: st.markdown(_insight_card("Source to Avoid", insight["avoid_source"], "#f85149"), unsafe_allow_html=True)
+                with i_c5: st.markdown(_insight_card("Currently Inconsistent Source", insight["currently_inconsistent_source"], "#d29922"), unsafe_allow_html=True)
 
         # Trust evolution chart (Plotly)
         if len(df["tick"].unique()) >= 2:
@@ -347,6 +378,12 @@ def render_live_ui():
                 "historic_status":   hist_status,
                 "decision":          decision,
             })
+
+        # ── ✨ 40-Tick Insight Trigger ───
+        import trust_engine
+        trust_engine._live_tick_counter = tick
+        if tick > 0 and tick % 40 == 0:
+            trust_engine._latest_40tick_report = trust_engine.compute_live_40tick_insight()
 
         # Re-render with new data
         _render_live_state()

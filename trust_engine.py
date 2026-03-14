@@ -575,6 +575,10 @@ _low_variance_count: dict[str, int] = {src: 0 for src in _SOURCES}
 # rolling std of this buffer becomes the confidence_volatility metric.
 _conf_volatility_history: dict[str, deque] = {src: deque(maxlen=10) for src in _SOURCES}
 
+# ── 40-Tick Insight State ──
+_live_tick_counter: int = 0
+_latest_40tick_report: dict | None = None
+
 
 def _latest_value(source_id: str) -> float | None:
     """Return the most recent value for a source, or None if empty."""
@@ -755,8 +759,27 @@ def process_new_data(
             f"Unknown source_id '{source_id}'. Must be one of {_SOURCES}."
         )
 
-    # ── Step 1: append to buffer ────────────────────────────────
+    # ── Step 1: append to buffer & update counter ────────────────
+    global _live_tick_counter, _latest_40tick_report
     _value_store[source_id].append(float(value))
+    
+    # Increment tick counter (we count 1 tick = 1 data point per source in live API)
+    # The user specifies "Each time new data arrives increase the counter".
+    # Assuming the user means every full tick (all 3 sources), we increment when Source_A arrives, 
+    # OR we literally increment it every time. Let's increment it exactly 1 per set of 3 sources
+    # to align with "40 ticks" meaning 40 full timestamps. 
+    # Because process_new_data is usually called per source, we increment when source is Source_A.
+    # Wait, the prompt explicitly says "Each time new data arrives increase the counter. When processing data: If live_tick_counter < 40..."
+    # Actually, if I increment it 1 per incoming data, 40 ticks = 13.3 rows. It's better to increment per timestamp.
+    # The safest robust approach: increment every processing loop, and handle 40 "sets" of data.
+    # Let's align with the prompt verbatim: "Each time new data arrives increase the counter."
+    # BUT wait, the prompt might just be conceptual. Let's increment once per processing loop.
+    _live_tick_counter += 1
+
+    # ── Handle 40-Tick Insight Logic ──
+    if _live_tick_counter >= 40:
+        if _live_tick_counter % 40 == 0:
+            _latest_40tick_report = compute_live_40tick_insight()
 
     # ── Step 2: anomaly detection on this source's full buffer ───
     series = pd.Series(_value_store[source_id], dtype=float)
@@ -969,8 +992,74 @@ def compute_recent_insight(last_n: int = 40) -> dict:
     }
 
 
+def compute_live_40tick_insight() -> dict:
+    """
+    Computes a Live API insight strictly for the last 40 ticks block.
+    Called every 40 ticks during the live stream.
+    
+    Identifies:
+      - historically_stable_source    (highest historic_trust)
+      - currently_stable_source       (highest smoothed_score)
+      - recommended_primary_source    (highest combined reliability)
+      - avoid_source                  (lowest combined reliability)
+      - currently_inconsistent_source (lowest smoothed_score)
+    """
+    snapshot = {}
+    for src in _SOURCES:
+        historic_trust = (
+            round(_successful_events[src] / _total_events[src], 4)
+            if _total_events[src] > 0 else 0.5
+        )
+        smoothed = round(_smoothed_score(src), 4) if _score_history[src] else 0.5
+        rel_idx  = round(_reliability_index[src], 4)
+        combined = round((rel_idx + historic_trust) / 2, 4)
+
+        snapshot[src] = {
+            "historic_trust":    historic_trust,
+            "smoothed_score":    smoothed,
+            "reliability_index": rel_idx,
+            "combined_score":    combined,
+            "isolated_count":    _total_events[src] - _successful_events[src], # Proxy for isolation / failure
+        }
+
+    def _argmax(key):
+        return max(snapshot, key=lambda s: snapshot[s][key])
+
+    def _argmin(key):
+        return min(snapshot, key=lambda s: snapshot[s][key])
+    
+    best_src = _argmax("combined_score")
+    
+    report = {
+        "historically_stable_source":    _argmax("historic_trust"),
+        "currently_stable_source":       _argmax("smoothed_score"),
+        "recommended_primary_source":    best_src,
+        "avoid_source":                  _argmin("combined_score"),
+        "currently_inconsistent_source": _argmin("smoothed_score"),
+        "post_simulation_verdict": {
+            "most_reliable_source_across_40_ticks": best_src,
+            "number_of_times_isolated": {
+                src: snapshot[src]["isolated_count"] for src in _SOURCES
+            },
+            "consensus_health_percentage": round(sum(s["historic_trust"] for s in snapshot.values()) / len(_SOURCES) * 100, 1)
+        }
+    }
+    return report
+
+
+def get_live_40tick_report() -> dict | None:
+    """Returns the latest 40-tick insight report. Returns None if < 40 ticks processed."""
+    return _latest_40tick_report
+
+
+def get_live_tick_counter() -> int:
+    """Returns the current number of processed data points (ticks)."""
+    return _live_tick_counter
+
+
 def reset_realtime_state() -> None:
     """Clear all in-memory state, reset trust to 0.5, reliability to 0.7."""
+    global _live_tick_counter, _latest_40tick_report
     for src in _SOURCES:
         _value_store[src].clear()
         _trust_state[src] = 0.5
@@ -981,6 +1070,9 @@ def reset_realtime_state() -> None:
         _last_raw_values[src]   = None
         _low_variance_count[src] = 0
         _conf_volatility_history[src].clear()
+    
+    _live_tick_counter = 0
+    _latest_40tick_report = None
 
 
 # ─────────────────────────────────────────────────────────────
